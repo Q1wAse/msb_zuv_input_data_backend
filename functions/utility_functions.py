@@ -26,7 +26,8 @@ class EnumMsg(Enum):
     SUCCESS         			= 0
     SYSTEM_ERROR			    = 1
     INCORRECT_PARAM             = 2
-    INCORRECT_PATCH_INPUT_DATA  = 3
+    INCORRECT_TAB_KEY           = 3
+    INCORRECT_PATCH_INPUT_DATA  = 4
 
 #============================================================================================
 #============================================================================================
@@ -34,13 +35,15 @@ msg_list = {
     EnumMsg.SUCCESS		                    : { 'code' : 200, 'is_err': False,	'msg' : 'Успешное выполнение операции' },
     EnumMsg.SYSTEM_ERROR			        : { 'code' : 500, 'is_err': True,	'msg' : 'Системная ошибка' },
     EnumMsg.INCORRECT_PARAM			        : { 'code' : 400, 'is_err': True,	'msg' : 'Неверно задано значение для %' },
+    EnumMsg.INCORRECT_TAB_KEY		        : { 'code' : 400, 'is_err': True,	'msg' : 'Некорректное имя ключа таблицы' },
     EnumMsg.INCORRECT_PATCH_INPUT_DATA		: { 'code' : 400, 'is_err': True,	'msg' : 'Некорректный формат обновляемых данных' },
 }
 
 TABLES_MAP = {
     'map_bs_product': {
         'tab_name': 'tab_map_bs_product_d816_4',
-        'fields': 'id, name, id_product, koef, factory'
+        'fields': 'id,name,id_product,koef,factory,type_raspr,sobstv,mest',
+        'mutable' : True
     },
     'products': {
         'tab_name': 'tab_product_d816_4',
@@ -49,6 +52,27 @@ TABLES_MAP = {
     'factory': {
         'tab_name': 'tab_factory_d816_4',
         'fields': 'id, name'
+    },
+    'type_raspr': {
+        'tab_name': 'tab_type_raspr_d816_4',
+        'fields': 'id, name'
+    },
+    'sobstv': {
+        'tab_name': 'tab_sobstv_d816_4',
+        'fields': 'id, name'
+    },
+    'mest': {
+        'tab_name': 'tab_mest_d816_4',
+        'fields': 'id, name'
+    },
+    'category_product': {
+        'tab_name': 'tab_view_category_product_d816_4',
+        'fields': 'id, name'
+    },
+    'ost': {
+        'tab_name': 'tab_ost_d816_4',
+        'fields': 'id,tab_factory_d816_4_ids,tab_category_product_d816_4_ids,tab_product_d816_4_ids,value,value_korr',
+        'mutable' : True
     }
 }
 
@@ -105,7 +129,7 @@ def is_valid_date(date_string):
 def validate_param(param, field_name):
     value = param.get(field_name)
     if field_name == "tab_id":
-        is_valid = isinstance(value, str)
+        is_valid = isinstance(value, str) and len(value) > 0
     elif field_name == "filter" and value is not None:
         is_valid = isinstance(value, str)
     elif field_name == "page":
@@ -198,7 +222,7 @@ def get_pagin_data(v_tab_id, v_filter, v_page, v_limit):
         loc_log_new(sys._getframe(0).f_code.co_name, locals(), e)
         return [0, []]
 #============================================================================================
-def patch_batch_products(resource_key, data_list):
+def patch_data(resource_key, data_list):
     db = get_db_connection()
     config = TABLES_MAP.get(resource_key)
 
@@ -230,7 +254,7 @@ def patch_batch_products(resource_key, data_list):
 
                     sql = text(
                         f"""
-                            UPDATE {config['tab_name']} 
+                            UPDATE {config.get('tab_name')} 
                             SET {set_fields} 
                             WHERE id = :id
                         """
@@ -256,6 +280,77 @@ def patch_batch_products(resource_key, data_list):
                 "status"    : "completed",
                 "details"   : results
         }
+    except Exception as e:
+        loc_log_new(sys._getframe(0).f_code.co_name, locals(), e)
+        abort(msg_list[EnumMsg.SYSTEM_ERROR].get('code'), description=get_msg_struct(EnumMsg.SYSTEM_ERROR)[0]['message'])
+#============================================================================================
+def map_pg_to_frontend(pg_type):
+    mapping = {
+        'integer'                       : 'number',
+        'numeric'                       : 'number',
+        'real'                          : 'number',
+        'double precision'              : 'number',
+        'character varying'             : 'string',
+        'text'                          : 'string',
+        'boolean'                       : 'boolean',
+        'timestamp without time zone'   : 'datetime',
+        'date'                          : 'date'
+    }
+    return mapping.get(pg_type, 'string')
+#============================================================================================
+def get_struct_table(key_tab):
+    db = get_db_connection()
+    config = TABLES_MAP.get(key_tab)
+    if not config:
+        abort(msg_list[EnumMsg.INCORRECT_TAB_KEY].get('code'), description=get_msg_struct(EnumMsg.INCORRECT_TAB_KEY)[0]['message'])
+
+    field_list = { col.strip() for col in TABLES_MAP.get(key_tab).get('fields').split(',') }
+
+    col_sql = text("""
+        SELECT
+            column_name,
+            data_type,
+            numeric_precision, 
+            numeric_scale,
+            character_maximum_length as max_len 
+        FROM information_schema.columns WHERE
+            table_name = :t_name AND
+            column_name IN :fields
+    """)
+
+    try:
+        res = db.execute(col_sql,
+                   {
+                       't_name' : config.get('tab_name'),
+                       'fields' : tuple(field_list)
+                   }
+        ).fetchall()
+
+        res_dict = []
+        for row in res:
+            type_data = map_pg_to_frontend(row.data_type)
+            if type_data == 'number':
+                res_dict.append(
+                    {
+                        row.column_name : {
+                            'type'      : type_data,
+                            'precision' : row.numeric_precision,
+                            'scale'     : row.numeric_scale
+                        }
+                    }
+                )
+            else:
+                res_dict.append(
+                    {
+                        row.column_name: {
+                            'type': type_data,
+                            'len': row.max_len
+                        }
+                    }
+                )
+
+        return res_dict
+
     except Exception as e:
         loc_log_new(sys._getframe(0).f_code.co_name, locals(), e)
         abort(msg_list[EnumMsg.SYSTEM_ERROR].get('code'), description=get_msg_struct(EnumMsg.SYSTEM_ERROR)[0]['message'])

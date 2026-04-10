@@ -13,7 +13,7 @@ from werkzeug.utils import secure_filename
 from flask_restx import Api, Resource, Namespace
 #from flask_cors import CORS
 #===================================================================================================================
-from msb_zuv_input_data_backend.namespaces.ns_input_map_bs_product import ns_pagin_data, ns_patch_data
+from msb_zuv_input_data_backend.namespaces.ns_input_map_bs_product import ns_input_data
 from msb_zuv_input_data_backend.config import Config, changelog, secret_key
 from msb_zuv_input_data_backend.database import cache
 #===================================================================================================================
@@ -50,8 +50,7 @@ cache.init_app(app)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 #===================================================================================================================
-api.add_namespace(ns_pagin_data, path='')
-api.add_namespace(ns_patch_data, path='')
+api.add_namespace(ns_input_data, path='')
 #===================================================================================================================
 if Config.SERVERBASE_MODE == 'PYTHON':
     app.run(debug=True)

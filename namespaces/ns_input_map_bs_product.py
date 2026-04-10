@@ -23,10 +23,39 @@ import msb_zuv_input_data_backend.functions.utility_functions as uf
 
 #==============================================================================================================================
 #==============================================================================================================================
-ns_pagin_data = Namespace('ns_pagin_data', description='get pagination data')
-
+tab_mutable_keys = tuple([ key for key, config in uf.TABLES_MAP.items() if config.get('mutable', False) ])
 tab_enum_keys = tuple(uf.TABLES_MAP.keys())
+#==============================================================================================================================
+#==============================================================================================================================
+ns_input_data = Namespace('ns_input_data', description='get/input data')
+#==============================================================================================================================
+#==============================================================================================================================
+container_get_struct_tab_data = reqparse.RequestParser()
+container_get_struct_tab_data.add_argument(
+    "tab_id",
+    default=tab_enum_keys[0],
+    type=str,
+    required=True,
+    choices=tab_enum_keys
+    # help=f"Enum keys: {', '.join(tab_enum_keys)}"
+)
+@ns_input_data.route('/get_struct')
+class ClsGetStructTabData(Resource):
+    @ns_input_data.expect(container_get_struct_tab_data)
+    def get(self):
+        try:
+            param_list: dict = container_get_struct_tab_data.parse_args()
 
+            uf.clear_loc_log()
+
+            v_tab_id = uf.validate_param(param_list, "tab_id")
+
+            return uf.get_struct_table(v_tab_id)
+
+        except Exception as e:
+            ns_input_data.abort(*errorhandler(e))
+#==============================================================================================================================
+#==============================================================================================================================
 container_pagin_data = reqparse.RequestParser()
 container_pagin_data.add_argument(
     "tab_id",
@@ -51,13 +80,15 @@ container_pagin_data.add_argument(
     help="1 <= limit <= 100",
     type=int
 )
-@ns_pagin_data.route('/get')
+@ns_input_data.route('/get')
 class ClsPaginData(Resource):
-    @ns_pagin_data.expect(container_pagin_data)
+    @ns_input_data.expect(container_pagin_data)
     def get(self):
         try:
             param_list : dict = container_pagin_data.parse_args()
+
             uf.clear_loc_log()
+
             v_tab_id = uf.validate_param(param_list, "tab_id")
             v_filter = uf.validate_param(param_list,"filter")
             v_page = uf.validate_param(param_list,  "page")
@@ -66,16 +97,31 @@ class ClsPaginData(Resource):
             return { "message" : str(uf.get_pagin_data(v_tab_id, v_filter, v_page, v_limit))} , 200
 
         except Exception as e:
-            ns_pagin_data.abort(*errorhandler(e))
+            ns_input_data.abort(*errorhandler(e))
 #==============================================================================================================================
 #==============================================================================================================================
-ns_patch_data = Namespace('ns_patch_data', description='patch data')
-@ns_patch_data.route('/patch')
-class ClsPatchData(Resource):
-    def post(self):
+container_patch_data = reqparse.RequestParser()
+container_patch_data.add_argument(
+    "tab_id",
+    default=tab_mutable_keys[0],
+    type=str,
+    required=True,
+    choices=tab_mutable_keys
+    # help=f"Enum keys: {', '.join(tab_enum_keys)}"
+)
+@ns_input_data.route('/patch')
+class ClsPatchMapBsProductData(Resource):
+    @ns_input_data.expect(container_patch_data)
+    def patch(self):
         try:
             # request.get_json()
-            data_list = ns_patch_data.payload
+            data_list = ns_input_data.payload
+
+            param_list: dict = container_patch_data.parse_args()
+
+            uf.clear_loc_log()
+
+            v_tab_id = uf.validate_param(param_list, "tab_id")
 
             # data_list = [
             #     {
@@ -98,9 +144,9 @@ class ClsPatchData(Resource):
             if not isinstance(data_list, list):
                 return uf.get_msg_struct(uf.EnumMsg.SYSTEM_ERROR)
 
-            return uf.patch_batch_products('map_bs_product', data_list)
+            return uf.patch_data(v_tab_id, data_list)
 
         except Exception as e:
-            ns_patch_data.abort(*errorhandler(e))
+            ns_input_data.abort(*errorhandler(e))
 #==============================================================================================================================
 #==============================================================================================================================
