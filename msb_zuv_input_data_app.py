@@ -14,6 +14,7 @@ from flask_restx import Api, Resource, Namespace
 #from flask_cors import CORS
 #===================================================================================================================
 from msb_zuv_input_data_backend.namespaces.ns_input_map_bs_product import ns_input_data
+from msb_zuv_input_data_backend.namespaces.ns_download_report import ns_download_report
 from msb_zuv_input_data_backend.config import Config, changelog, secret_key
 from msb_zuv_input_data_backend.database import cache
 #===================================================================================================================
@@ -51,6 +52,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 #===================================================================================================================
 api.add_namespace(ns_input_data, path='')
+api.add_namespace(ns_download_report, path='')
 #===================================================================================================================
 if Config.SERVERBASE_MODE == 'PYTHON':
     app.run(debug=True)

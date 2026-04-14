@@ -9,7 +9,6 @@ from typing import Any
 
 from io import BytesIO
 
-from scripts.regsetup import description
 from werkzeug.datastructures import FileStorage
 from sqlalchemy import text, func, select, and_, distinct, or_, column
 from sqlalchemy.orm import Session
@@ -80,7 +79,7 @@ container_pagin_data.add_argument(
     help="1 <= limit <= 100",
     type=int
 )
-@ns_input_data.route('/get')
+@ns_input_data.route('/get_tab')
 class ClsPaginData(Resource):
     @ns_input_data.expect(container_pagin_data)
     def get(self):
@@ -109,7 +108,7 @@ container_patch_data.add_argument(
     choices=tab_mutable_keys
     # help=f"Enum keys: {', '.join(tab_enum_keys)}"
 )
-@ns_input_data.route('/patch')
+@ns_input_data.route('/patch_tab')
 class ClsPatchMapBsProductData(Resource):
     @ns_input_data.expect(container_patch_data)
     def patch(self):
