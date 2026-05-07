@@ -79,6 +79,18 @@ container_pagin_data.add_argument(
     help="1 <= limit <= 100",
     type=int
 )
+container_pagin_data.add_argument(
+    "year",
+    type=int
+)
+container_pagin_data.add_argument(
+    "month",
+    type=int
+)
+container_pagin_data.add_argument(
+    "quarter",
+    type=int
+)
 @ns_input_data.route('/get_tab')
 class ClsPaginData(Resource):
     @ns_input_data.expect(container_pagin_data)
@@ -92,8 +104,15 @@ class ClsPaginData(Resource):
             v_filter = uf.validate_param(param_list,"filter")
             v_page = uf.validate_param(param_list,  "page")
             v_limit = uf.validate_param(param_list, "limit")
+            v_year = uf.validate_param(param_list, "year")
+            v_month = uf.validate_param(param_list, "month")
+            v_quarter = uf.validate_param(param_list, "quarter")
 
-            return { "message" : str(uf.get_pagin_data(v_tab_id, v_filter, v_page, v_limit))} , 200
+            result = uf.get_pagin_data(v_tab_id, v_filter, v_page, v_limit, v_year, v_month, v_quarter)
+            if v_tab_id == 'ost':
+                return result, 200
+
+            return { "message" : result} , 200
 
         except Exception as e:
             ns_input_data.abort(*errorhandler(e))

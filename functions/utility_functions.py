@@ -1,6 +1,6 @@
 ﻿from typing import NamedTuple, Tuple, Any
 from enum import Enum
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 import sys, os, io, openpyxl
 
@@ -18,7 +18,7 @@ from msb_zuv_input_data_backend.database import engine_py, db_py
 
 try:
     from access_control_center.centrilized_database_pool import get_session
-except (ImportError, ModuleNotFoundError):
+except Exception:
     get_session = None
 #============================================================================================
 #============================================================================================
@@ -74,6 +74,15 @@ TABLES_MAP = {
         'fields': 'id,tab_factory_d816_4_ids,tab_category_product_d816_4_ids,tab_product_d816_4_ids,value,value_korr',
         'mutable' : True
     }
+}
+
+OST_FIXED_FILTERS = {
+    'var_plan_id': 0,
+    'vers_plan_id': 0,
+    'type_real_id': 3,
+    'type_raspr_id': 4,
+    'post_zuv_id': 0,
+    'type_pokazatel_id': 100340000
 }
 
 sql_folder = "sql"
@@ -136,6 +145,12 @@ def validate_param(param, field_name):
         is_valid = isinstance(value, int) and value >= 1
     elif field_name == "limit":
         is_valid = isinstance(value, int) and (1 <= value <= 100)
+    elif field_name == "year":
+        is_valid = value is None or (isinstance(value, int) and value >= 1)
+    elif field_name == "month":
+        is_valid = value is None or (isinstance(value, int) and (1 <= value <= 12))
+    elif field_name == "quarter":
+        is_valid = value is None or (isinstance(value, int) and (1 <= value <= 4))
     else:
         is_valid = (value is None)
 
@@ -189,7 +204,184 @@ def get_param_connect():
     db = get_db_connection()
     return  db.execute(text("SELECT connection_params FROM tab_params_email_d314 WHERE system_code = 'IS_KAO_DATA'")).first()
 #============================================================================================
-def get_pagin_data(v_tab_id, v_filter, v_page, v_limit):
+def to_json_safe(value):
+    if isinstance(value, Decimal):
+        return str(value)
+    if isinstance(value, (date, datetime)):
+        return value.isoformat()
+    return value
+#============================================================================================
+def get_latest_ost_period(db):
+    period_sql = text("""
+        SELECT
+            year,
+            month,
+            quarter
+        FROM tab_ost_d816_4
+        WHERE
+            tab_var_plan_d816_4_ids = :var_plan_id AND
+            tab_vers_plan_d816_4_ids = :vers_plan_id AND
+            tab_type_real_d816_4_ids = :type_real_id AND
+            tab_type_raspr_d816_4_ids = :type_raspr_id AND
+            tab_post_zuv_d816_4_ids = :post_zuv_id AND
+            type_pokazatel = :type_pokazatel_id
+        ORDER BY year DESC, month DESC, quarter DESC, id DESC
+        LIMIT 1
+    """)
+    return db.execute(period_sql, OST_FIXED_FILTERS).mappings().first()
+#============================================================================================
+def get_ost_pagin_data(v_filter, v_page, v_limit, v_year = None, v_month = None, v_quarter = None):
+    db = get_db_connection()
+    offset = max(0, (v_page - 1) * v_limit)
+
+    if v_month is not None and v_quarter is None:
+        v_quarter = ((v_month - 1) // 3) + 1
+
+    if v_year is None and v_month is None and v_quarter is None:
+        last_period = get_latest_ost_period(db)
+        if not last_period:
+            return {
+                "tab_id": "ost",
+                "year": None,
+                "month": None,
+                "quarter": None,
+                "page": v_page,
+                "limit": v_limit,
+                "total": 0,
+                "rows": []
+            }
+        v_year = last_period.get('year')
+        v_month = last_period.get('month')
+        v_quarter = last_period.get('quarter')
+
+    params = {
+        **OST_FIXED_FILTERS,
+        "limit": v_limit,
+        "offset": offset
+    }
+
+    where_parts = [
+        "ost.tab_var_plan_d816_4_ids = :var_plan_id",
+        "ost.tab_vers_plan_d816_4_ids = :vers_plan_id",
+        "ost.tab_type_real_d816_4_ids = :type_real_id",
+        "ost.tab_type_raspr_d816_4_ids = :type_raspr_id",
+        "ost.tab_post_zuv_d816_4_ids = :post_zuv_id",
+        "ost.type_pokazatel = :type_pokazatel_id"
+    ]
+
+    if v_year is not None:
+        where_parts.append("ost.year = :year")
+        params["year"] = v_year
+    if v_month is not None:
+        where_parts.append("ost.month = :month")
+        params["month"] = v_month
+    if v_quarter is not None:
+        where_parts.append("ost.quarter = :quarter")
+        params["quarter"] = v_quarter
+    if v_filter:
+        where_parts.append("""
+            (
+                COALESCE(factory.name, '') ILIKE :filter OR
+                COALESCE(map_bs.name, '') ILIKE :filter OR
+                COALESCE(category.name, '') ILIKE :filter OR
+                COALESCE(product.name, '') ILIKE :filter
+            )
+        """)
+        params["filter"] = f"%{v_filter}%"
+
+    where_sql = " AND ".join(where_parts)
+    from_sql = """
+        FROM tab_ost_d816_4 ost
+        LEFT JOIN (
+            SELECT DISTINCT ON (id)
+                id,
+                name
+            FROM tab_factory_d816_4
+            ORDER BY id
+        ) factory
+            ON factory.id = ost.tab_factory_d816_4_ids
+        LEFT JOIN (
+            SELECT DISTINCT ON (id)
+                id,
+                name,
+                id_product
+            FROM tab_map_bs_product_d816_4
+            ORDER BY id
+        ) map_bs
+            ON CAST(map_bs.id AS VARCHAR) = TRIM(ost.tab_bud_st_d816_4_ids)
+        LEFT JOIN (
+            SELECT DISTINCT ON (id)
+                id,
+                name,
+                tab_category_product_d816_4_ids
+            FROM tab_product_d816_4
+            ORDER BY id
+        ) product
+            ON product.id = COALESCE(NULLIF(map_bs.id_product, 0), NULLIF(ost.tab_product_d816_4_ids, 0))
+        LEFT JOIN (
+            SELECT DISTINCT ON (id)
+                id,
+                name
+            FROM tab_view_category_product_d816_4
+            ORDER BY id
+        ) category
+            ON category.id = COALESCE(NULLIF(product.tab_category_product_d816_4_ids, 0), NULLIF(ost.tab_category_product_d816_4_ids, 0))
+    """
+
+    try:
+        count_sql = text(f"""
+            SELECT count(DISTINCT ost.id)
+            {from_sql}
+            WHERE {where_sql}
+        """)
+        total = db.execute(count_sql, params).scalar()
+
+        sql_text = text(f"""
+            SELECT DISTINCT ON (ost.id)
+                ost.id,
+                ost.tab_factory_d816_4_ids AS factory_id,
+                TRIM(COALESCE(factory.name, '')) AS factory_name,
+                ost.tab_bud_st_d816_4_ids AS budget_article_id,
+                TRIM(COALESCE(map_bs.name, '')) AS budget_article_name,
+                COALESCE(NULLIF(product.tab_category_product_d816_4_ids, 0), NULLIF(ost.tab_category_product_d816_4_ids, 0)) AS category_product_id,
+                TRIM(COALESCE(category.name, '')) AS category_product_name,
+                COALESCE(NULLIF(map_bs.id_product, 0), NULLIF(ost.tab_product_d816_4_ids, 0)) AS product_id,
+                TRIM(COALESCE(product.name, '')) AS product_name,
+                ost.value,
+                ost.value_korr
+            {from_sql}
+            WHERE {where_sql}
+            ORDER BY ost.id
+            LIMIT :limit OFFSET :offset
+        """)
+        rows = db.execute(sql_text, params).fetchall()
+        rows = [
+            {
+                key: to_json_safe(value)
+                for key, value in row._mapping.items()
+            }
+            for row in rows
+        ]
+
+        return {
+            "tab_id": "ost",
+            "year": v_year,
+            "month": v_month,
+            "quarter": v_quarter,
+            "page": v_page,
+            "limit": v_limit,
+            "total": total,
+            "rows": rows
+        }
+
+    except Exception as e:
+        loc_log_new(sys._getframe(0).f_code.co_name, locals(), e)
+        abort(msg_list[EnumMsg.SYSTEM_ERROR].get('code'), description=get_msg_struct(EnumMsg.SYSTEM_ERROR)[0]['message'])
+#============================================================================================
+def get_pagin_data(v_tab_id, v_filter, v_page, v_limit, v_year = None, v_month = None, v_quarter = None):
+    if v_tab_id == 'ost':
+        return get_ost_pagin_data(v_filter, v_page, v_limit, v_year, v_month, v_quarter)
+
     db = get_db_connection()
     offset = max(0, (v_page - 1) * v_limit)
 
@@ -215,6 +407,7 @@ def get_pagin_data(v_tab_id, v_filter, v_page, v_limit):
             LIMIT :limit OFFSET :offset
         """)
         rows = db.execute(sql_text, params).fetchall()
+        rows = [[to_json_safe(value) for value in row] for row in rows]
 
         return [total, rows]
 

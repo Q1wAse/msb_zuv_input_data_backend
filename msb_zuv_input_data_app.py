@@ -1,8 +1,12 @@
 import sys
 import os
 #===================================================================================================================
-sys.path.insert(0, '/usr/lib64/python3.8/site-packages')
-sys.path.insert(0, 'opt/foresight')
+CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+PARENT_DIR = os.path.dirname(CURRENT_DIR)
+
+for path in ('/usr/lib64/python3.8/site-packages', '/opt/foresight', PARENT_DIR):
+    if path not in sys.path:
+        sys.path.insert(0, path)
 #===================================================================================================================
 import logging
 from flask import Flask, jsonify, request
@@ -22,7 +26,7 @@ try:
     from access_control_center.access_control_center_app import validate_requester
     from access_control_center.centrilized_database_pool import database_session_pool, get_session
     from central_logging_system.logger import init_logger
-except (ImportError, ModuleNotFoundError):
+except Exception:
     validate_requester = None
     database_session_pool = None
     get_session = None
@@ -54,7 +58,7 @@ logger = logging.getLogger(__name__)
 api.add_namespace(ns_input_data, path='')
 api.add_namespace(ns_download_report, path='')
 #===================================================================================================================
-if Config.SERVERBASE_MODE == 'PYTHON':
+application = app
+
+if __name__ == '__main__' and Config.SERVERBASE_MODE == 'PYTHON':
     app.run(debug=True)
-elif Config.SERVERBASE_MODE == 'WSGI':
-    application = app
