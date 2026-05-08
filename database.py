@@ -9,7 +9,6 @@ from msb_zuv_input_data_backend.config import Config
 if Config.SERVERBASE_MODE == 'PYTHON':
     Base = declarative_base()
     engine_py = create_engine(Config.SQLALCHEMY_DATABASE_URI, pool_size=30)
-    Base.metadata.create_all(bind=engine_py)
     db_py = scoped_session(sessionmaker(bind=engine_py))
 else:
     engine_py = None
