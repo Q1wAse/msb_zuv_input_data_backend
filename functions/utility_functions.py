@@ -6,7 +6,7 @@ import sys, os, io, openpyxl
 
 from urllib.parse import parse_qs
 from decimal import Decimal
-from flask import session, g, abort
+from flask import session, g, abort, send_file
 
 from sqlalchemy import inspect, text, exc
 from sqlalchemy.orm.attributes import InstrumentedAttribute
@@ -75,9 +75,11 @@ TABLES_MAP = {
         'mutable' : True
     }
 }
-
+main_folder = "/opt/foresight/msb_zuv_input_data_backend" if sys.platform.lower() in 'linux' else os.getcwd()
+file_folder = "file"
 sql_folder = "sql"
-main_folder = "/opt/foresight/msb_zuv_input_data_backend"
+
+template_name = "template (MSB ZUV).xlsx"
 
 #============================================================================================
 #============================================================================================
@@ -136,6 +138,8 @@ def validate_param(param, field_name):
         is_valid = isinstance(value, int) and value >= 1
     elif field_name == "limit":
         is_valid = isinstance(value, int) and (1 <= value <= 100)
+    elif field_name == "year":
+        is_valid = isinstance(value, int) and (0 <= value <= 9999)
     else:
         is_valid = (value is None)
 
@@ -189,6 +193,15 @@ def get_param_connect():
     db = get_db_connection()
     return  db.execute(text("SELECT connection_params FROM tab_params_email_d314 WHERE system_code = 'IS_KAO_DATA'")).first()
 #============================================================================================
+def convert_row(row):
+    result = {}
+    for key, value in row.items():
+        if isinstance(value, Decimal):
+            result[key] = float(value) #str(value)
+        else:
+            result[key] = value
+    return result
+#============================================================================================
 def get_pagin_data(v_tab_id, v_filter, v_page, v_limit):
     db = get_db_connection()
     offset = max(0, (v_page - 1) * v_limit)
@@ -200,7 +213,7 @@ def get_pagin_data(v_tab_id, v_filter, v_page, v_limit):
         "offset": offset
     }
 
-    print(str(v_tab_id) + " " + str(dict(TABLES_MAP).values()))
+    # print(str(v_tab_id) + " " + str(dict(TABLES_MAP).values()))
 
     v_tabname = TABLES_MAP[v_tab_id].get('tab_name')
     field_list = TABLES_MAP[v_tab_id].get('fields')
@@ -214,9 +227,10 @@ def get_pagin_data(v_tab_id, v_filter, v_page, v_limit):
             {cond} 
             LIMIT :limit OFFSET :offset
         """)
-        rows = db.execute(sql_text, params).fetchall()
-
-        return [total, rows]
+        rows = db.execute(sql_text, params).mappings() #fetchall()
+        if rows:
+            rows = [convert_row(row) for row in rows]
+        return [{'count' : total }, {'rows' : rows}]
 
     except Exception as e:
         loc_log_new(sys._getframe(0).f_code.co_name, locals(), e)
@@ -354,4 +368,106 @@ def get_struct_table(key_tab):
     except Exception as e:
         loc_log_new(sys._getframe(0).f_code.co_name, locals(), e)
         abort(msg_list[EnumMsg.SYSTEM_ERROR].get('code'), description=get_msg_struct(EnumMsg.SYSTEM_ERROR)[0]['message'])
+#============================================================================================
+def get_row_list_msb_zuv_d816_4(year : int, ver_plan : int, var_plan : int, bs : list, do : int, data_type : int):
+    db = get_db_connection()
+    col_sql = text("""
+                SELECT
+                    SUM(SUM),
+                    BS,
+                    CALYEAR, 
+                    CALQUART,
+                    CALMONTH 
+                FROM tab_integ_get_preu_mirror_d816_4 WHERE
+                    CALYEAR::INT = :year AND            -- Год планирования
+                    BCBLM0001::INT = :ver_plan AND      -- Версия планирования
+                    BCBLM0002::INT = :var_plan AND      -- Вариант планирования              
+                    BS = ANY((:bs)::int[]) AND          -- Бюджетные статьи
+                    BCBIM0002::INT = :do AND            -- Завод (Дочернее общество)
+                    DATA_TYPE::INT = :data_type AND     -- Тип данных
+                    CALMONTH <> 0
+                GROUP BY BS, CALYEAR, CALQUART, CALMONTH
+                ORDER by CALMONTH
+            """)
+    result = db.execute(col_sql,
+                     {
+                         'year': year,
+                         'ver_plan' : ver_plan,
+                         'var_plan' : var_plan,
+                         'bs' : f"{{{','.join(map(str, bs))}}}",
+                         'do' : do,
+                         'data_type' : data_type
+                     }
+                     ).fetchall()
+    return result
+def download_report(year):
+    path_template = str(Path(main_folder) / Path(file_folder) / Path(template_name))
+    do = 31 # ГД Астрахань
+    data_type = 1 # План
+
+    # Получаем рабочую книгу из шаблона
+    wb = openpyxl.load_workbook(path_template)
+
+    # Создаём буфер для наполнения
+    buffer = io.BytesIO()
+
+    # Получаем объект Лист1
+    # sheet = wb[wb.sheetnames[0]]
+    sheet = wb['5. ГД Астрахань']
+
+    bs = []
+    for row in sheet['E8' : 'E20']:
+        val = row[0].value
+        if val is not None and str(val).isdigit():
+            bs.append(val)
+
+    q_res = get_row_list_msb_zuv_d816_4(year, 22600, 2260099, bs, do, 1)
+    for i in range(8, 21):
+        for row in q_res:
+            col_offset = {
+                1 : 'AB' + str(i),
+                2 : 'AO' + str(i),
+                3 : 'BB' + str(i),
+                4 : 'BO' + str(i)
+            }
+
+            cell_val = sheet[col_offset[row.calquart]].offset(row=0, column=0 + ((row.calmonth - 1) % 3) * 3)
+            if cell_val.data_type == 'f':
+                continue
+
+            cell_bs = sheet.cell(row=i, column=5)
+            if row.bs == cell_bs.value:
+                cell_val.value = row.sum
+
+    q_res = get_row_list_msb_zuv_d816_4(year, 22600, 2260010, bs, do, 1)
+    for i in range(8, 21):
+        for row in q_res:
+            col_offset = {
+                1: 'AB' + str(i),
+                2: 'AO' + str(i),
+                3: 'BB' + str(i),
+                4: 'BO' + str(i)
+            }
+
+            cell_val = sheet[col_offset[row.calquart]].offset(row=0, column=1 + ((row.calmonth - 1) % 3) * 3)
+            if cell_val.data_type == 'f':
+                continue
+
+            cell_bs = sheet.cell(row=i, column=5)
+            if row.bs == cell_bs.value:
+                cell_val.value = row.sum
+
+    # Сохраняем подготовленные данные из шаблона
+    wb.save(buffer)
+    # Откатываем курсор в самое начало
+    buffer.seek(0)
+    # имя файла
+    filename = "test_file.xlsx"
+
+    return send_file(
+            buffer,
+            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            as_attachment=True,
+            download_name=filename
+        )
 #============================================================================================

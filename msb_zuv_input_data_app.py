@@ -11,6 +11,9 @@ from sqlalchemy import  select, distinct, not_, literal, func, and_
 from werkzeug.exceptions import HTTPException, InternalServerError
 from werkzeug.utils import secure_filename
 from flask_restx import Api, Resource, Namespace
+from flask.json.provider import DefaultJSONProvider
+from decimal import Decimal
+import datetime
 #from flask_cors import CORS
 #===================================================================================================================
 from msb_zuv_input_data_backend.namespaces.ns_input_map_bs_product import ns_input_data
@@ -28,7 +31,16 @@ except (ImportError, ModuleNotFoundError):
     get_session = None
     init_logger = None
 #===================================================================================================================
+class ClsCustomJSONProvider(DefaultJSONProvider):
+    def default(self, obj):
+        if isinstance(obj, Decimal):
+            return float(obj)
+        if isinstance(obj, (datetime.datetime, datetime.date)):
+            return obj.isoformat()
+        return super().default(obj)
+#===================================================================================================================
 app = Flask(__name__)
+app.json = ClsCustomJSONProvider(app)
 app.config.from_object(Config)
 app.secret_key = secret_key
 #===================================================================================================================

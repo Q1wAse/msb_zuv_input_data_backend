@@ -52,6 +52,12 @@ class ClsDownloadReport(Resource):
 
             uf.clear_loc_log()
 
+            param_list: dict = container_download_report.parse_args()
+
+            v_year = uf.validate_param(param_list, "year")
+
+            return uf.download_report(v_year)
+
         except Exception as e:
             ns_download_report.abort(*errorhandler(e))
 #==============================================================================================================================

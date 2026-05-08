@@ -92,8 +92,7 @@ class ClsPaginData(Resource):
             v_filter = uf.validate_param(param_list,"filter")
             v_page = uf.validate_param(param_list,  "page")
             v_limit = uf.validate_param(param_list, "limit")
-
-            return { "message" : str(uf.get_pagin_data(v_tab_id, v_filter, v_page, v_limit))} , 200
+            return uf.get_pagin_data(v_tab_id, v_filter, v_page, v_limit), 200
 
         except Exception as e:
             ns_input_data.abort(*errorhandler(e))
@@ -102,15 +101,27 @@ class ClsPaginData(Resource):
 container_patch_data = reqparse.RequestParser()
 container_patch_data.add_argument(
     "tab_id",
-    default=tab_mutable_keys[0],
+    default=tab_mutable_keys[1],
     type=str,
     required=True,
     choices=tab_mutable_keys
     # help=f"Enum keys: {', '.join(tab_enum_keys)}"
 )
+
+patch_any_model = ns_input_data.model('UpdateList', {
+    'rows': fields.Raw(
+        description='Структура',
+        example=[
+            {"id": 98, "koef": 2.0, "factory": 998},
+            {"id": 99, "name": "99 имя 999", "id_product": 999}
+        ]
+    )
+})
+
 @ns_input_data.route('/patch_tab')
 class ClsPatchMapBsProductData(Resource):
-    @ns_input_data.expect(container_patch_data)
+    # @ns_input_data.expect(container_patch_data, list_update_model)
+    @ns_input_data.expect(container_patch_data, patch_any_model, validate=False)
     def patch(self):
         try:
             # request.get_json()
@@ -140,10 +151,10 @@ class ClsPatchMapBsProductData(Resource):
             #     }
             # ]
 
-            if not isinstance(data_list, list):
+            if not isinstance(data_list.get('rows'), list):
                 return uf.get_msg_struct(uf.EnumMsg.SYSTEM_ERROR)
 
-            return uf.patch_data(v_tab_id, data_list)
+            return uf.patch_data(v_tab_id, data_list.get('rows'))
 
         except Exception as e:
             ns_input_data.abort(*errorhandler(e))
