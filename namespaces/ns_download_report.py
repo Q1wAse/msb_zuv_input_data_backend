@@ -44,6 +44,14 @@ container_download_report.add_argument(
     help="default value: current year",
     type=int
 )
+container_download_report.add_argument(
+    "template_name",
+    default=uf.template_list[0],
+    type=str,
+    required=True,
+    choices=uf.template_list,
+    help=f"Enum keys: {', '.join(uf.template_list)}"
+)
 @ns_download_report.route('/download_report')
 class ClsDownloadReport(Resource):
     @ns_download_report.expect(container_download_report)
@@ -54,9 +62,10 @@ class ClsDownloadReport(Resource):
 
             param_list: dict = container_download_report.parse_args()
 
-            v_year = uf.validate_param(param_list, "year")
+            v_year = uf.get_validate_param(param_list, "year")
+            v_template_name =  uf.get_validate_param(param_list, "template_name")
 
-            return uf.download_report(v_year)
+            return uf.download_report(v_year,v_template_name)
 
         except Exception as e:
             ns_download_report.abort(*errorhandler(e))

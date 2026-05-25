@@ -3,6 +3,7 @@ from enum import Enum
 from datetime import date
 from pathlib import Path
 import sys, os, io, openpyxl
+from openpyxl.utils.cell import range_boundaries
 
 from urllib.parse import parse_qs
 from decimal import Decimal
@@ -28,6 +29,7 @@ class EnumMsg(Enum):
     INCORRECT_PARAM             = 2
     INCORRECT_TAB_KEY           = 3
     INCORRECT_PATCH_INPUT_DATA  = 4
+    INCORRECT_TEMPLATE_NAME     = 5
 
 #============================================================================================
 #============================================================================================
@@ -37,6 +39,7 @@ msg_list = {
     EnumMsg.INCORRECT_PARAM			        : { 'code' : 400, 'is_err': True,	'msg' : 'Неверно задано значение для %' },
     EnumMsg.INCORRECT_TAB_KEY		        : { 'code' : 400, 'is_err': True,	'msg' : 'Некорректное имя ключа таблицы' },
     EnumMsg.INCORRECT_PATCH_INPUT_DATA		: { 'code' : 400, 'is_err': True,	'msg' : 'Некорректный формат обновляемых данных' },
+    EnumMsg.INCORRECT_TEMPLATE_NAME		    : { 'code' : 400, 'is_err': True,	'msg' : 'Некорректное наименование шаблона' },
 }
 
 TABLES_MAP = {
@@ -75,11 +78,33 @@ TABLES_MAP = {
         'mutable' : True
     }
 }
+
+template_list = [
+        'Астрахань',
+        'Сосногорск'
+    ]
+template_setups = [
+        {  # Астраханский ГПЗ
+            'index'         : 1,
+            'template_name' : 'Астрахань',
+            'do'            : 38,
+            'pj'            : 7
+        },
+        {  # Сосногорский ГПЗ
+            'index'         : 2,
+            'template_name' : 'Сосногорск',
+            'do'            : 38,
+            'pj'            : 1
+        }
+    ]
+
 main_folder = "/opt/foresight/msb_zuv_input_data_backend" if sys.platform.lower() in 'linux' else os.getcwd()
 file_folder = "file"
 sql_folder = "sql"
 
-template_name = "template (MSB ZUV).xlsx"
+# template_name = "template (MSB ZUV).xlsx"
+# template_name = "Астрахань.xlsx"
+
 
 #============================================================================================
 #============================================================================================
@@ -128,7 +153,7 @@ def is_valid_date(date_string):
     except ValueError:
         return False
 
-def validate_param(param, field_name):
+def get_validate_param(param, field_name):
     value = param.get(field_name)
     if field_name == "tab_id":
         is_valid = isinstance(value, str) and len(value) > 0
@@ -141,7 +166,7 @@ def validate_param(param, field_name):
     elif field_name == "year":
         is_valid = isinstance(value, int) and (0 <= value <= 9999)
     else:
-        is_valid = (value is None)
+        is_valid = True #(value is not None)
 
     if not is_valid:
         err_msg = get_msg_struct(EnumMsg.INCORRECT_PARAM, field_name)[0]['message']
@@ -230,7 +255,8 @@ def get_pagin_data(v_tab_id, v_filter, v_page, v_limit):
         rows = db.execute(sql_text, params).mappings() #fetchall()
         if rows:
             rows = [convert_row(row) for row in rows]
-        return [{'count' : total }, {'rows' : rows}]
+        # return [{'count' : total }, {'rows' : rows}]
+        return {'count' : total, 'rows' : rows}
 
     except Exception as e:
         loc_log_new(sys._getframe(0).f_code.co_name, locals(), e)
@@ -369,7 +395,7 @@ def get_struct_table(key_tab):
         loc_log_new(sys._getframe(0).f_code.co_name, locals(), e)
         abort(msg_list[EnumMsg.SYSTEM_ERROR].get('code'), description=get_msg_struct(EnumMsg.SYSTEM_ERROR)[0]['message'])
 #============================================================================================
-def get_row_list_msb_zuv_d816_4(year : int, ver_plan : int, var_plan : int, bs : list, do : int, data_type : int):
+def get_row_list_msb_zuv_d816_4(year : int, ver_plan : int, var_plan : int, bs : list, do : int, pj : int, data_type : int):
     db = get_db_connection()
     col_sql = text("""
                 SELECT
@@ -384,26 +410,37 @@ def get_row_list_msb_zuv_d816_4(year : int, ver_plan : int, var_plan : int, bs :
                     BCBLM0002::INT = :var_plan AND      -- Вариант планирования              
                     BS = ANY((:bs)::int[]) AND          -- Бюджетные статьи
                     BCBIM0002::INT = :do AND            -- Завод (Дочернее общество)
+                    pj = :pj AND                        -- Перерабатывающий комплекс (Поставщики ЖУВ)
                     DATA_TYPE::INT = :data_type AND     -- Тип данных
-                    CALMONTH <> 0
+                    CALMONTH <> 0 AND
+                    DBS = 0
                 GROUP BY BS, CALYEAR, CALQUART, CALMONTH
                 ORDER by CALMONTH
             """)
     result = db.execute(col_sql,
                      {
-                         'year': year,
-                         'ver_plan' : ver_plan,
-                         'var_plan' : var_plan,
-                         'bs' : f"{{{','.join(map(str, bs))}}}",
-                         'do' : do,
-                         'data_type' : data_type
+                         'year'         : year,
+                         'ver_plan'     : ver_plan,
+                         'var_plan'     : var_plan,
+                         'bs'           : f"{{{','.join(map(str, bs))}}}",
+                         'do'           : do,
+                         'pj'           : pj,
+                         'data_type'    : data_type
                      }
                      ).fetchall()
     return result
-def download_report(year):
+def download_report(year, template_name):
+    settings = [item for item in template_setups if item['template_name'] == template_name]
+    if not settings:
+        return
+
+    if settings[0].get('all', False):
+        settings = [item for item in template_setups if item['template_name'] != template_name]
+    if not settings:
+        return
+
+    template_name += '.xlsx'
     path_template = str(Path(main_folder) / Path(file_folder) / Path(template_name))
-    do = 31 # ГД Астрахань
-    data_type = 1 # План
 
     # Получаем рабочую книгу из шаблона
     wb = openpyxl.load_workbook(path_template)
@@ -411,58 +448,81 @@ def download_report(year):
     # Создаём буфер для наполнения
     buffer = io.BytesIO()
 
-    # Получаем объект Лист1
-    # sheet = wb[wb.sheetnames[0]]
-    sheet = wb['5. ГД Астрахань']
+    named_value = wb.defined_names['_YEAR']
+    if named_value:
+        named_value.value = year
 
-    bs = []
-    for row in sheet['E8' : 'E20']:
-        val = row[0].value
-        if val is not None and str(val).isdigit():
-            bs.append(val)
+    #for index, item in enumerate(settings, start=1):
+    for item in settings:
+        do = item.get('do')
+        pj = item.get('pj')
+        index = item.get('index')
 
-    q_res = get_row_list_msb_zuv_d816_4(year, 22600, 2260099, bs, do, 1)
-    for i in range(8, 21):
-        for row in q_res:
-            col_offset = {
-                1 : 'AB' + str(i),
-                2 : 'AO' + str(i),
-                3 : 'BB' + str(i),
-                4 : 'BO' + str(i)
-            }
+        def_range_bs = wb.defined_names[f'_BS{index}']
+        if not def_range_bs:
+            continue
 
-            cell_val = sheet[col_offset[row.calquart]].offset(row=0, column=0 + ((row.calmonth - 1) % 3) * 3)
-            if cell_val.data_type == 'f':
+        bs_col_index = -1
+        dict_month_col_index = []
+        sheet_name = ''
+        for sheet_name_rng_bs, cell_coordinates in def_range_bs.destinations:
+            bs_col_index, _, _, _ = range_boundaries(cell_coordinates)
+            sheet_name = sheet_name_rng_bs
+        for i in range(1, 13):
+            def_range_month = wb.defined_names[f'_MONTH{index}_{i}']
+            for sheet_name_rng_month, cell_coordinates in def_range_month.destinations:
+                min_col, _, _, _ = range_boundaries(cell_coordinates)
+                dict_month_col_index.append(min_col)
+
+        if bs_col_index != -1 and sheet_name and len(dict_month_col_index) == 12:
+            dict_bs = []
+            sheet = wb[sheet_name]
+            if not sheet:
                 continue
 
-            cell_bs = sheet.cell(row=i, column=5)
-            if row.bs == cell_bs.value:
-                cell_val.value = row.sum
-
-    q_res = get_row_list_msb_zuv_d816_4(year, 22600, 2260010, bs, do, 1)
-    for i in range(8, 21):
-        for row in q_res:
-            col_offset = {
-                1: 'AB' + str(i),
-                2: 'AO' + str(i),
-                3: 'BB' + str(i),
-                4: 'BO' + str(i)
-            }
-
-            cell_val = sheet[col_offset[row.calquart]].offset(row=0, column=1 + ((row.calmonth - 1) % 3) * 3)
-            if cell_val.data_type == 'f':
+            last_row = sheet.max_row
+            for i in range(1, last_row + 1):
+                cell = sheet.cell(row=i,column=bs_col_index)
+                if cell.value is not None and str(cell.value).isdigit():
+                    dict_bs.append(cell.value)
+            if not dict_bs:
                 continue
 
-            cell_bs = sheet.cell(row=i, column=5)
-            if row.bs == cell_bs.value:
-                cell_val.value = row.sum
+            query_plan_99_res = get_row_list_msb_zuv_d816_4(year, 22600, 2260099, dict_bs, do, pj, 1)
+            query_plan_10_res = get_row_list_msb_zuv_d816_4(year, 22600, 2260010, dict_bs, do, pj, 1)
+            query_fact_res = get_row_list_msb_zuv_d816_4(year, 0, 0, dict_bs, do, pj, 15)
+
+            for i in range(1, last_row + 1):
+                cell_bs = sheet.cell(row=i, column=bs_col_index)
+                if cell_bs and cell_bs.value is not None and str(cell_bs.value).isdigit():
+                    # for month_col in dict_month_col_index:
+                    for ind, it in enumerate(dict_month_col_index, start=1):
+                        for row in query_plan_99_res:
+                            cell_val = sheet.cell(row=i, column=it)
+                            if cell_val and cell_val.data_type == 'f':
+                                continue
+                            if int(row.bs) == int(cell_bs.value) and ind == row.calmonth:
+                                cell_val.value = row.sum
+                        for row in query_plan_10_res:
+                            cell_val = sheet.cell(row=i, column=it+1)
+                            if cell_val and cell_val.data_type == 'f':
+                                continue
+                            if int(row.bs) == int(cell_bs.value) and ind == row.calmonth:
+                                cell_val.value = row.sum
+                        for row in query_fact_res:
+                            cell_val = sheet.cell(row=i , column=it+2)
+                            if cell_val and cell_val.data_type == 'f':
+                                continue
+                            if int(row.bs) == int(cell_bs.value) and ind == row.calmonth:
+                                cell_val.value = row.sum
+
 
     # Сохраняем подготовленные данные из шаблона
     wb.save(buffer)
     # Откатываем курсор в самое начало
     buffer.seek(0)
     # имя файла
-    filename = "test_file.xlsx"
+    filename = template_name # "test_file.xlsx"
 
     return send_file(
             buffer,

@@ -47,7 +47,7 @@ class ClsGetStructTabData(Resource):
 
             uf.clear_loc_log()
 
-            v_tab_id = uf.validate_param(param_list, "tab_id")
+            v_tab_id = uf.get_validate_param(param_list, "tab_id")
 
             return uf.get_struct_table(v_tab_id)
 
@@ -88,10 +88,10 @@ class ClsPaginData(Resource):
 
             uf.clear_loc_log()
 
-            v_tab_id = uf.validate_param(param_list, "tab_id")
-            v_filter = uf.validate_param(param_list,"filter")
-            v_page = uf.validate_param(param_list,  "page")
-            v_limit = uf.validate_param(param_list, "limit")
+            v_tab_id = uf.get_validate_param(param_list, "tab_id")
+            v_filter = uf.get_validate_param(param_list, "filter")
+            v_page = uf.get_validate_param(param_list, "page")
+            v_limit = uf.get_validate_param(param_list, "limit")
             return uf.get_pagin_data(v_tab_id, v_filter, v_page, v_limit), 200
 
         except Exception as e:
@@ -131,7 +131,7 @@ class ClsPatchMapBsProductData(Resource):
 
             uf.clear_loc_log()
 
-            v_tab_id = uf.validate_param(param_list, "tab_id")
+            v_tab_id = uf.get_validate_param(param_list, "tab_id")
 
             # data_list = [
             #     {
