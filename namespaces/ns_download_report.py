@@ -24,7 +24,7 @@ import msb_zuv_input_data_backend.functions.utility_functions as uf
 ns_download_report = Namespace('ns_download_report', description='download report')
 #==============================================================================================================================
 #==============================================================================================================================
-container_download_report = reqparse.RequestParser()
+# container_download_report = reqparse.RequestParser()
 
 # Период планирования
 # Версия планирования
@@ -38,34 +38,83 @@ container_download_report = reqparse.RequestParser()
 # BVR_BCBIM002_132_01     38
 # BVR_BCBEM0006_132_01    7
 
-container_download_report.add_argument(
-    "year",
-    default=datetime.date.today().year,
-    help="default value: current year",
-    type=int
-)
-container_download_report.add_argument(
-    "template_name",
-    default=uf.template_list[0],
-    type=str,
-    required=True,
-    choices=uf.template_list,
-    help=f"Enum keys: {', '.join(uf.template_list)}"
-)
+column_model = ns_download_report.model('ReportColumn', {
+    'typeData': fields.String(description='Тип данных', required=True),
+    'versionPlaning': fields.String(description='Версия планирования', required=True),
+    'variantPlaning': fields.String(description='Вариант планирования', required=True),
+    'dateRange': fields.List(
+        fields.String,
+        description='Диапазон дат [начало, конец]',
+        required=True
+    )
+})
+
+download_report_model = ns_download_report.model('ContainerReport', {
+    'selectedFactories': fields.List(
+        fields.String,
+        description='Список выбранных заводов',
+        required=True,
+        example=["1"]
+        # example=["1", "2", "3"]
+    ),
+    'selectedReports': fields.List(
+        fields.String,
+        description='Список выбранных отчетов',
+        required=True,
+        example=[]
+        # example=["1","2"]
+    ),
+    'columns': fields.List(
+        fields.Nested(column_model),
+        description='Список колонок с параметрами',
+        required=True,
+        example=[
+            {
+                "typeData": "1",   #1 - План
+                "versionPlaning": "22600",
+                "variantPlaning" : "2260099",
+                "dateRange": ["01.01.2026", "31.12.2026"]
+            },
+            {
+                "typeData": "1",   #1 - План
+                "versionPlaning": "22600",
+                "variantPlaning" : "2260010",
+                "dateRange": ["01.01.2026", "31.12.2026"]
+            },
+            {
+                "typeData": "15",   #2 - Факт
+                "dateRange": ["01.01.2026", "31.12.2026"]
+            }
+        ]
+    )
+})
+
 @ns_download_report.route('/download_report')
 class ClsDownloadReport(Resource):
-    @ns_download_report.expect(container_download_report)
-    def get(self):
+    # @ns_download_report.expect(container_download_report,download_report_model)
+    @ns_download_report.expect(download_report_model)
+    def post(self):
         try:
 
             uf.clear_loc_log()
 
-            param_list: dict = container_download_report.parse_args()
+            # OLD MODEL
+            #param_list: dict = container_download_report.parse_args()
 
-            v_year = uf.get_validate_param(param_list, "year")
-            v_template_name =  uf.get_validate_param(param_list, "template_name")
+            # v_year = uf.get_validate_param(param_list, "year")
+            # v_template_name =  uf.get_validate_param(param_list, "template_name")
+            #
+            # return uf.download_report(v_year,v_template_name)
 
-            return uf.download_report(v_year,v_template_name)
+            v_selected_factories = ns_download_report.payload.get('selectedFactories')
+            v_selected_reports = ns_download_report.payload.get('selectedReports')
+            v_columns = ns_download_report.payload.get('columns')
+
+            if v_columns:
+                v_selected_factories = [int(factory_id) for factory_id in v_selected_factories]
+                return uf.download_report2(v_selected_factories,v_selected_reports,v_columns)
+            else:
+                return uf.get_msg_struct(uf.EnumMsg.NO_SELECTED_COLUMNS)
 
         except Exception as e:
             ns_download_report.abort(*errorhandler(e))

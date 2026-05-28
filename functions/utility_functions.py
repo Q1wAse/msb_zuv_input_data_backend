@@ -4,10 +4,12 @@ from datetime import date
 from pathlib import Path
 import sys, os, io, openpyxl
 from openpyxl.utils.cell import range_boundaries
+from openpyxl.utils import get_column_letter
 
 from urllib.parse import parse_qs
 from decimal import Decimal
 from flask import session, g, abort, send_file
+import re
 
 from sqlalchemy import inspect, text, exc
 from sqlalchemy.orm.attributes import InstrumentedAttribute
@@ -24,12 +26,14 @@ except (ImportError, ModuleNotFoundError):
 #============================================================================================
 #============================================================================================
 class EnumMsg(Enum):
-    SUCCESS         			= 0
-    SYSTEM_ERROR			    = 1
-    INCORRECT_PARAM             = 2
-    INCORRECT_TAB_KEY           = 3
-    INCORRECT_PATCH_INPUT_DATA  = 4
-    INCORRECT_TEMPLATE_NAME     = 5
+    SUCCESS         			    = 0
+    SYSTEM_ERROR			        = 1
+    INCORRECT_PARAM                 = 2
+    INCORRECT_TAB_KEY               = 3
+    INCORRECT_PATCH_INPUT_DATA      = 4
+    INCORRECT_TEMPLATE_NAME         = 5
+    NO_SELECTED_COLUMNS             = 6
+    SETTINGS_FOR_REPORT_NOT_FOUND   = 7
 
 #============================================================================================
 #============================================================================================
@@ -40,6 +44,8 @@ msg_list = {
     EnumMsg.INCORRECT_TAB_KEY		        : { 'code' : 400, 'is_err': True,	'msg' : 'Некорректное имя ключа таблицы' },
     EnumMsg.INCORRECT_PATCH_INPUT_DATA		: { 'code' : 400, 'is_err': True,	'msg' : 'Некорректный формат обновляемых данных' },
     EnumMsg.INCORRECT_TEMPLATE_NAME		    : { 'code' : 400, 'is_err': True,	'msg' : 'Некорректное наименование шаблона' },
+    EnumMsg.NO_SELECTED_COLUMNS		        : { 'code' : 400, 'is_err': True,	'msg' : 'Должен быть выбран хотя бы один столбец' },
+    EnumMsg.SETTINGS_FOR_REPORT_NOT_FOUND	: { 'code' : 400, 'is_err': True,	'msg' : 'Не удалось найти настройки для выбранных отчётов из таблицы: "tab_factories_d816_4"' },
 }
 
 TABLES_MAP = {
@@ -76,6 +82,27 @@ TABLES_MAP = {
         'tab_name': 'tab_ost_d816_4',
         'fields': 'id,tab_factory_d816_4_ids,tab_category_product_d816_4_ids,tab_product_d816_4_ids,value,value_korr',
         'mutable' : True
+    },
+
+    'factories' :{
+        'tab_name': 'tab_factories_d816_4',
+        'fields' : 'id,name'
+    },
+    'type_reports' :{
+        'tab_name': 'tab_type_reports_d816_4',
+        'fields' : 'id,name'
+    },
+    'data_type' :{
+        'tab_name': 'tab_view_io_bcblm0003_d816_4',
+        'fields' : 'id,name'
+    },
+    'vers_plan' :{
+        'tab_name': 'tab_view_vers_plan_d816_4',
+        'fields' : 'id,name'
+    },
+    'var_plan' :{
+        'tab_name': 'tab_view_var_plan_d816_4',
+        'fields' : 'id,name'
     }
 }
 
@@ -101,10 +128,6 @@ template_setups = [
 main_folder = "/opt/foresight/msb_zuv_input_data_backend" if sys.platform.lower() in 'linux' else os.getcwd()
 file_folder = "file"
 sql_folder = "sql"
-
-# template_name = "template (MSB ZUV).xlsx"
-# template_name = "Астрахань.xlsx"
-
 
 #============================================================================================
 #============================================================================================
@@ -207,12 +230,6 @@ def exec_sql_from_file(file_name, params = {}):
                 abort(msg_list[EnumMsg.SYSTEM_ERROR].get('code'), description=get_msg_struct(EnumMsg.SYSTEM_ERROR)[0]['message'])
         return '-2'
     return '-1'
-
-def get_date(service):
-    res = exec_sql_from_file(service.UNI_PROP.get("SQL_GET_DATE_FROM_SRC"))
-    if res and not type(res) is str:
-        return res.first()[0]
-    return  "None"
 
 def get_param_connect():
     db = get_db_connection()
@@ -429,6 +446,7 @@ def get_row_list_msb_zuv_d816_4(year : int, ver_plan : int, var_plan : int, bs :
                      }
                      ).fetchall()
     return result
+#============================================================================================
 def download_report(year, template_name):
     settings = [item for item in template_setups if item['template_name'] == template_name]
     if not settings:
@@ -531,3 +549,231 @@ def download_report(year, template_name):
             download_name=filename
         )
 #============================================================================================
+def get_data_from_query(sql_text, param=None):
+    db = get_db_connection()
+    if db:
+        if param:
+            return db.execute(text(sql_text), param).fetchall()
+        else:
+            return db.execute(text(sql_text)).fetchall()
+    return []
+#============================================================================================
+def download_report2(selected_factories,selected_reports,columns):
+    factories_all = [row.id for row in get_data_from_query("SELECT id FROM tab_factories_d816_4")]
+    if not selected_factories:
+        selected_factories = factories_all
+    if not selected_reports:
+        selected_reports = [1]
+
+    settings = get_data_from_query(
+        'SELECT id, "DO", pj FROM tab_factories_d816_4 WHERE id IN :factory_ids',
+        {"factory_ids": tuple(selected_factories)})
+    if not settings:
+        return get_msg_struct(EnumMsg.SETTINGS_FOR_REPORT_NOT_FOUND)
+
+    composite_keys_do_pj = [(row.DO, row.pj) for row in settings]
+
+    bs_calc_mapping = get_data_from_query(
+        """
+                    SELECT "DO", pj, bs, calc FROM tab_bs_calc_map_d816_4 WHERE ("DO",pj) IN :composite_keys
+                """,
+        {"composite_keys": tuple(composite_keys_do_pj)})
+
+
+    temp_data = {}
+    for col in columns:
+        type_id = int(col['typeData'])
+
+        if type_id == 1:
+            if type_id not in temp_data:
+                temp_data[type_id] = []
+
+            temp_data[type_id].append({ 'variant_planing': col.get('variantPlaning') })
+
+        else:
+            temp_data[type_id] = {'simple': True}
+
+    columns_collect = [{key: val} for key, val in temp_data.items()]
+
+    columns_text = []
+    # for collect in columns_collect:
+    for item in columns_collect:
+        for type_id, collect in item.items():
+            if type_id == 1:
+                variants = [item['variant_planing'] for item in collect]
+
+                query_res = get_data_from_query(
+                    'SELECT id, name FROM tab_view_var_plan_d816_4 WHERE id IN :variant_ids',
+                    {'variant_ids': tuple(variants)})
+                for row in query_res:
+                    columns_text.append({'typeData' : type_id, 'id' : row.id, 'name' : row.name})
+
+            elif type_id == 15:
+                query_res = get_data_from_query(
+                    'SELECT id, name FROM tab_view_io_bcblm0003_d816_4 WHERE id = :type_id',
+                    {'type_id': type_id})
+                for row in query_res:
+                    columns_text.append({'typeData' : type_id, 'id':row.id, 'name' : row.name})
+
+    def get_txt_col(column):
+        if 'typeData' in column:
+            typeData = int(column.get('typeData'))
+            if typeData == 1 and 'variantPlaning' in column:
+                matched_item = next( (item for item in columns_text if int(item['id']) == int(column.get('variantPlaning'))), '' )
+                return matched_item.get('name','')
+            elif typeData == 15:
+                matched_item = next((item for item in columns_text if int(item['id']) == typeData), '')
+                return matched_item.get('name', '')
+        return ''
+
+    template_name = 'Астрахань.xlsx'
+    path_template = str(Path(main_folder) / Path(file_folder) / Path(template_name))
+
+    # Получаем рабочую книгу из шаблона
+    wb = openpyxl.load_workbook(path_template)
+
+    # Создаём буфер для наполнения
+    buffer = io.BytesIO()
+
+    #===================================================================================================================
+    for factory_id in factories_all:
+        loc_settings = [row for row in settings if row.id == factory_id]
+        try:
+            def_range_bs = wb.defined_names[f'_BS{factory_id}']
+        except Exception as e:
+            continue
+        sheet_name_bs = ''
+        bs_col_index = -1
+        for sheet_name_rng_bs, cell_coordinates_rng_bs in def_range_bs.destinations:
+            bs_col_index, _, _, _ = range_boundaries(cell_coordinates_rng_bs)
+            sheet_name_bs = sheet_name_rng_bs
+            sheet = wb[sheet_name_bs]
+            if factory_id not in selected_factories:
+                sheet.sheet_state = 'veryHidden'
+                continue
+
+            sheet.sheet_state = 'visible'
+            if sheet and bs_col_index != -1:
+                dict_bs = []
+                last_row = sheet.max_row
+                first_row = -1
+                for i in range(1, last_row + 1):
+                    cell = sheet.cell(row=i, column=bs_col_index)
+                    if cell.value is not None and str(cell.value).isdigit():
+                        dict_bs.append(cell.value)
+                    if cell.value == 'ID':
+                        first_row = i
+                if not dict_bs or first_row == -1:
+                    continue
+
+                loc_bs_calc_mapping = [row for row in bs_calc_mapping if row.DO == loc_settings[0].DO and row.pj == loc_settings[0].pj]
+
+                columns_layout = []
+                for index_column, column in enumerate(columns):
+#################   вместо index_column, можно занести название столбца [на будущее]
+                    columns_layout.append({"type": "year", "data_type_col": index_column, 'col_name' : get_txt_col(column)})
+                for q in range(1, 5):
+                    for index_column, column in enumerate(columns):
+                        columns_layout.append({"type": f"Q{q}", "data_type_col": index_column, 'col_name' : get_txt_col(column)})
+
+                    for m in range(1, 4):
+                        for index_column, column in enumerate(columns):
+                            columns_layout.append({"type": f"M{q}_{m}", "data_type_col": index_column, 'col_name' : get_txt_col(column), 'calmonth': (q-1)*3+m})
+
+                count_columns = len(columns)
+
+                for idx, col in enumerate(columns_layout):
+                    col_num = idx + bs_col_index + 1 + 1
+                    cell = sheet.cell(row=first_row, column=col_num)
+                    cell.value = col.get('col_name')
+
+                query_res_for_column = []
+                # for column in columns:
+                for index_column, column in enumerate(columns, start=1):
+                    year = column.get('dateRange')[0][-4:]
+                    ver_plan = column.get('versionPlaning', 0)
+                    var_plan = column.get('variantPlaning', 0)
+                    do = settings[0].DO
+                    pj = settings[0].pj
+                    data_type = column.get('typeData')
+                    query_res_for_column.append(get_row_list_msb_zuv_d816_4(year, ver_plan, var_plan, dict_bs, do, pj, data_type))
+
+                fill_obj_column(sheet,dict_bs,bs_col_index,first_row,last_row,loc_settings,loc_bs_calc_mapping,count_columns, columns_layout, query_res_for_column)
+    #===================================================================================================================
+
+    # Сохраняем подготовленные данные из шаблона
+    wb.save(buffer)
+    # Откатываем курсор в самое начало
+    buffer.seek(0)
+    # имя файла
+    filename = "test_file.xlsx"
+
+    return send_file(
+        buffer,
+        mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        as_attachment=True,
+        download_name=filename
+    )
+#============================================================================================
+def fill_obj_column(sheet,dict_bs,bs_col_index,first_row,last_row,settings, bs_calc_mapping,count_sel_column, columns_layout, query_res_for_column):
+
+    def get_col_letter_by_type(col_type, data_type_col):
+        for idx, col in enumerate(columns_layout):
+            if col["type"] == col_type and col["data_type_col"] == data_type_col:
+                return get_column_letter(bs_col_index + idx + 1)
+        return None
+
+    def set_cell_val(cell,col_letter,query_res,bs_calc_mapping):
+        for map in bs_calc_mapping:
+            if map.bs == cell_bs.value and map.calc != None:
+                parts = re.split(r'(\d+)', map.calc)
+                src_formula = "="
+                for p in parts:
+                    if p.isdigit():
+                        for i in range(1, last_row + 1):
+                            loc_cell_bs = sheet.cell(row=i, column=bs_col_index)
+                            if loc_cell_bs.value == p:
+                                p = f"{col_letter}{i}"
+                                break
+                    src_formula += p
+                cell.value = src_formula
+                return
+        for row in query_res:
+            if int(row.bs) == int(cell_bs.value) and col["calmonth"] == row.calmonth:
+                cell.value = row.sum
+                return
+        return
+
+    for i in range(1, last_row + 1):
+        cell_bs = sheet.cell(row=i, column=bs_col_index)
+        if cell_bs and cell_bs.value is not None and str(cell_bs.value).isdigit():
+            for idx, col in enumerate(columns_layout):
+                col_num = idx + bs_col_index + 1 + 1
+                col_letter = get_column_letter(col_num)
+                data_type_col = col["data_type_col"]
+
+                if "year" in col["type"]:
+                    q1 = get_col_letter_by_type("Q1", data_type_col)
+                    q2 = get_col_letter_by_type("Q2", data_type_col)
+                    q3 = get_col_letter_by_type("Q3", data_type_col)
+                    q4 = get_col_letter_by_type("Q4", data_type_col)
+                    sheet[f"{col_letter}{i}"] = f"={q1}{i}+{q2}{i}+{q3}{i}+{q4}{i}"
+
+                elif "Q" in col["type"]:
+                    q_num = col["type"][1]
+
+                    m1 = get_col_letter_by_type(f"M{q_num}_1", data_type_col)
+                    m2 = get_col_letter_by_type(f"M{q_num}_2", data_type_col)
+                    m3 = get_col_letter_by_type(f"M{q_num}_3", data_type_col)
+                    sheet[f"{col_letter}{i}"] = f"={m1}{i}+{m2}{i}+{m3}{i}"
+
+                elif "M" in col["type"]:
+                    cell_val = sheet[f"{col_letter}{i}"]
+                    # cell_val.value = col["calmonth"]
+                    set_cell_val(cell_val,col_letter,query_res_for_column[col['data_type_col']],bs_calc_mapping)
+
+    #    ГОД 2026               квартал 1               январь                  февраль                   март                  квартал 2               апрель                  май
+    # [1     2       3]     [4       5       6]     [7      8       9]     [10     11      12]     [13     14      15]     [16     17      18]     [19     20      21]     [22     23      24]
+    #                                               [1      2       3]     [4       5       6]     [7       8       9]                             [10     11      12]     [13     14      15]
+
+    return False
