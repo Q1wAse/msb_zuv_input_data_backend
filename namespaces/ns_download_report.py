@@ -120,3 +120,50 @@ class ClsDownloadReport(Resource):
             ns_download_report.abort(*errorhandler(e))
 #==============================================================================================================================
 #==============================================================================================================================
+@ns_download_report.route('/get_struct')
+class ClsStructDataDownloadReport(Resource):
+    @ns_download_report.expect()
+    def get(self):
+        try:
+
+            uf.clear_loc_log()
+
+            # TABLES_MAP
+            # factories
+            # type_reports
+            # data_type
+            # vers_plan
+            # var_plan
+
+            total : dict
+
+            versions  = uf.get_pagin_data('var_plan', '', 1, 100)
+
+            grouped = {}
+            for item in versions:
+                v_id = item["tab_vers_plan_ids"]
+
+                if v_id not in grouped:
+                    grouped[v_id] = {
+                        "version": v_id,
+                        "variants": []
+                    }
+
+                grouped[v_id]["variants"].append({
+                    "tab_vers_plan_ids": item["id"],
+                    "name": item["name"]
+                })
+
+            total = {
+                'factories': uf.get_pagin_data('factories', '', 1, 100),
+                'type_reports': uf.get_pagin_data('type_reports', '', 1, 100),
+                'data_type': uf.get_pagin_data('data_type', '', 1, 100),
+                'versions': list(grouped.values()),
+            }
+
+            return total, 200
+
+        except Exception as e:
+            ns_download_report.abort(*errorhandler(e))
+#==============================================================================================================================
+#==============================================================================================================================

@@ -3,8 +3,12 @@ from enum import Enum
 from datetime import date
 from pathlib import Path
 import sys, os, io, openpyxl
+
+from openpyxl.cell import Cell
 from openpyxl.utils.cell import range_boundaries
 from openpyxl.utils import get_column_letter
+from openpyxl.styles import Font, Alignment
+from openpyxl.styles import Border, Side
 
 from urllib.parse import parse_qs
 from decimal import Decimal
@@ -102,7 +106,7 @@ TABLES_MAP = {
     },
     'var_plan' :{
         'tab_name': 'tab_view_var_plan_d816_4',
-        'fields' : 'id,name'
+        'fields' : 'tab_vers_plan_ids,name,id'
     }
 }
 
@@ -244,7 +248,7 @@ def convert_row(row):
             result[key] = value
     return result
 #============================================================================================
-def get_pagin_data(v_tab_id, v_filter, v_page, v_limit):
+def get_pagin_data_old(v_tab_id, v_filter, v_page, v_limit):
     db = get_db_connection()
     offset = max(0, (v_page - 1) * v_limit)
 
@@ -278,6 +282,45 @@ def get_pagin_data(v_tab_id, v_filter, v_page, v_limit):
     except Exception as e:
         loc_log_new(sys._getframe(0).f_code.co_name, locals(), e)
         return [0, []]
+#============================================================================================
+#############################################################################################
+#############################################################################################
+#############################################################################################
+#============================================================================================
+def get_pagin_data(v_tab_id, v_filter, v_page, v_limit):
+    db = get_db_connection()
+    offset = max(0, (v_page - 1) * v_limit)
+
+    cond = "WHERE name ILIKE :filter" if v_filter else ""
+    params = {
+        "filter": f"%{v_filter}%" if v_filter else "%",
+        "limit": v_limit,
+        "offset": offset
+    }
+
+    # print(str(v_tab_id) + " " + str(dict(TABLES_MAP).values()))
+
+    v_tabname = TABLES_MAP[v_tab_id].get('tab_name')
+    field_list = TABLES_MAP[v_tab_id].get('fields')
+
+    try:
+        count_sql = text(f"SELECT count(*) FROM {v_tabname} {cond}")
+        total = db.execute(count_sql, params).scalar()
+
+        sql_text = text(f"""
+            SELECT {field_list} FROM {v_tabname} 
+            {cond} 
+            LIMIT :limit OFFSET :offset
+        """)
+        rows = db.execute(sql_text, params).mappings() #fetchall()
+        if rows:
+            rows = [convert_row(row) for row in rows]
+        # return [{'count' : total }, {'rows' : rows}]
+        return rows
+
+    except Exception as e:
+        loc_log_new(sys._getframe(0).f_code.co_name, locals(), e)
+        return []
 #============================================================================================
 def patch_data(resource_key, data_list):
     db = get_db_connection()
@@ -558,7 +601,61 @@ def get_data_from_query(sql_text, param=None):
             return db.execute(text(sql_text)).fetchall()
     return []
 #============================================================================================
+def set_value_cell(cell, value, LevelTitle=0):
+    simple_font = Font(
+        name="Times New Roman",
+        size=14,
+        bold=True,
+        color="000000"
+    )
+    formula_font = Font(
+        name="Times New Roman",
+        size=14,
+        bold=True,
+        color="0000FF"
+    )
+    title_font = {
+        1 : Font(
+                name="Times New Roman",
+                size=10,
+                bold=True
+            ),
+        2 : Font(
+                name="Times New Roman",
+                size=14,
+                bold=True
+            )
+    }
+
+    cell.value = value
+    cell.number_format = '#,##0.00'
+
+    if LevelTitle > 0:
+        cell.font = title_font[LevelTitle]
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    else:
+        if cell.data_type == 'f':
+            cell.font = formula_font
+        else:
+            cell.font = simple_font
+
 def download_report2(selected_factories,selected_reports,columns):
+
+    month = {
+        1 : 'январь',
+        2 : 'февраль',
+        3 : 'март',
+        4 : 'апрель',
+        5 : 'май',
+        6 : 'июнь',
+        7 : 'июль',
+        8 : 'август',
+        9 : 'сентябрь',
+        10 : 'октябрь',
+        11 : 'ноябрь',
+        12 : 'декабрь',
+    }
+    offset_ind_col = 1
     factories_all = [row.id for row in get_data_from_query("SELECT id FROM tab_factories_d816_4")]
     if not selected_factories:
         selected_factories = factories_all
@@ -670,22 +767,66 @@ def download_report2(selected_factories,selected_reports,columns):
 
                 columns_layout = []
                 for index_column, column in enumerate(columns):
-#################   вместо index_column, можно занести название столбца [на будущее]
-                    columns_layout.append({"type": "year", "data_type_col": index_column, 'col_name' : get_txt_col(column)})
+                    columns_layout.append({
+                        "type": f"year{column.get('dateRange')[0][-4:]}",
+                        "data_type_col": index_column,
+                        'IsNeedMerge' : True if index_column == 0 else False,
+                        'col_name' : get_txt_col(column)
+                    })
                 for q in range(1, 5):
                     for index_column, column in enumerate(columns):
-                        columns_layout.append({"type": f"Q{q}", "data_type_col": index_column, 'col_name' : get_txt_col(column)})
+                        columns_layout.append({
+                            "type": f"Q{q}",
+                            "data_type_col":index_column,
+                            'IsNeedMerge' : True if index_column == 0 else False,
+                            'col_name' : get_txt_col(column)
+                        })
 
                     for m in range(1, 4):
                         for index_column, column in enumerate(columns):
-                            columns_layout.append({"type": f"M{q}_{m}", "data_type_col": index_column, 'col_name' : get_txt_col(column), 'calmonth': (q-1)*3+m})
+                            columns_layout.append({
+                                "type": f"M{q}_{m}",
+                                "data_type_col": index_column,
+                                'IsNeedMerge' : True if index_column == 0 else False,
+                                'col_name' : get_txt_col(column),
+                                'calmonth': (q-1)*3+m
+                            })
 
                 count_columns = len(columns)
 
+                # 'thin', 'medium', 'thick', 'double', 'dashed'
+                thin_line = Side(border_style="thin", color="000000")
+                full_border = Border(left=thin_line, right=thin_line, top=thin_line, bottom=thin_line)
+                for row in sheet.iter_rows(
+                        min_row=first_row,
+                        max_row=last_row,
+                        min_col=bs_col_index + 1 + offset_ind_col,
+                        max_col=bs_col_index + 1 + offset_ind_col + len(columns_layout)-1):
+                    for cell in row:
+                        cell.border = full_border
+
+                sheet.row_dimensions[first_row+1].height = 40
+
                 for idx, col in enumerate(columns_layout):
-                    col_num = idx + bs_col_index + 1 + 1
-                    cell = sheet.cell(row=first_row, column=col_num)
-                    cell.value = col.get('col_name')
+                    col_num = idx + bs_col_index + 1 + offset_ind_col
+                    col_letter = get_column_letter(col_num)
+                    sheet.column_dimensions[col_letter].width = 22 #16.29
+                    cell = sheet.cell(row=first_row+1, column=col_num)
+                    set_value_cell(cell,col.get('col_name'), 1)
+
+                    if col["IsNeedMerge"]:
+                        sheet.merge_cells(start_row=first_row, start_column=col_num, end_row=first_row,
+                                          end_column=col_num + count_columns - 1)
+                        cell = sheet.cell(row=first_row, column=col_num)
+
+                        if "year" in col["type"]:
+                            set_value_cell(cell,col.get('type')[-4:], 2)
+                        elif "Q" in col['type']:
+                            q_number = col['type'][1]
+                            set_value_cell(cell,f"{q_number} квартал", 2)
+                        elif "M" in col["type"]:
+                            set_value_cell(cell,month[col.get('calmonth')], 2)
+
 
                 query_res_for_column = []
                 # for column in columns:
@@ -698,7 +839,7 @@ def download_report2(selected_factories,selected_reports,columns):
                     data_type = column.get('typeData')
                     query_res_for_column.append(get_row_list_msb_zuv_d816_4(year, ver_plan, var_plan, dict_bs, do, pj, data_type))
 
-                fill_obj_column(sheet,dict_bs,bs_col_index,first_row,last_row,loc_settings,loc_bs_calc_mapping,count_columns, columns_layout, query_res_for_column)
+                fill_obj_column(offset_ind_col, sheet,dict_bs,bs_col_index,first_row,last_row,loc_settings,loc_bs_calc_mapping,count_columns, columns_layout, query_res_for_column)
     #===================================================================================================================
 
     # Сохраняем подготовленные данные из шаблона
@@ -715,17 +856,17 @@ def download_report2(selected_factories,selected_reports,columns):
         download_name=filename
     )
 #============================================================================================
-def fill_obj_column(sheet,dict_bs,bs_col_index,first_row,last_row,settings, bs_calc_mapping,count_sel_column, columns_layout, query_res_for_column):
+def fill_obj_column(offset_ind_col, sheet,dict_bs,bs_col_index,first_row,last_row,settings, bs_calc_mapping,count_sel_column, columns_layout, query_res_for_column):
 
     def get_col_letter_by_type(col_type, data_type_col):
         for idx, col in enumerate(columns_layout):
             if col["type"] == col_type and col["data_type_col"] == data_type_col:
-                return get_column_letter(bs_col_index + idx + 1)
+                return get_column_letter(bs_col_index + idx + 1 + offset_ind_col)
         return None
 
     def set_cell_val(cell,col_letter,query_res,bs_calc_mapping):
         for map in bs_calc_mapping:
-            if map.bs == cell_bs.value and map.calc != None:
+            if map.bs == cell_bs.value and map.calc != None and map.calc != '':
                 parts = re.split(r'(\d+)', map.calc)
                 src_formula = "="
                 for p in parts:
@@ -736,11 +877,11 @@ def fill_obj_column(sheet,dict_bs,bs_col_index,first_row,last_row,settings, bs_c
                                 p = f"{col_letter}{i}"
                                 break
                     src_formula += p
-                cell.value = src_formula
+                set_value_cell(cell, src_formula)
                 return
         for row in query_res:
             if int(row.bs) == int(cell_bs.value) and col["calmonth"] == row.calmonth:
-                cell.value = row.sum
+                set_value_cell(cell, row.sum)
                 return
         return
 
@@ -748,7 +889,7 @@ def fill_obj_column(sheet,dict_bs,bs_col_index,first_row,last_row,settings, bs_c
         cell_bs = sheet.cell(row=i, column=bs_col_index)
         if cell_bs and cell_bs.value is not None and str(cell_bs.value).isdigit():
             for idx, col in enumerate(columns_layout):
-                col_num = idx + bs_col_index + 1 + 1
+                col_num = idx + bs_col_index + 1 + offset_ind_col
                 col_letter = get_column_letter(col_num)
                 data_type_col = col["data_type_col"]
 
@@ -757,7 +898,8 @@ def fill_obj_column(sheet,dict_bs,bs_col_index,first_row,last_row,settings, bs_c
                     q2 = get_col_letter_by_type("Q2", data_type_col)
                     q3 = get_col_letter_by_type("Q3", data_type_col)
                     q4 = get_col_letter_by_type("Q4", data_type_col)
-                    sheet[f"{col_letter}{i}"] = f"={q1}{i}+{q2}{i}+{q3}{i}+{q4}{i}"
+                    # sheet[f"{col_letter}{i}"] = f"={q1}{i}+{q2}{i}+{q3}{i}+{q4}{i}"
+                    set_value_cell(sheet[f"{col_letter}{i}"], f"={q1}{i}+{q2}{i}+{q3}{i}+{q4}{i}")
 
                 elif "Q" in col["type"]:
                     q_num = col["type"][1]
@@ -765,11 +907,11 @@ def fill_obj_column(sheet,dict_bs,bs_col_index,first_row,last_row,settings, bs_c
                     m1 = get_col_letter_by_type(f"M{q_num}_1", data_type_col)
                     m2 = get_col_letter_by_type(f"M{q_num}_2", data_type_col)
                     m3 = get_col_letter_by_type(f"M{q_num}_3", data_type_col)
-                    sheet[f"{col_letter}{i}"] = f"={m1}{i}+{m2}{i}+{m3}{i}"
+                    # sheet[f"{col_letter}{i}"] = f"={m1}{i}+{m2}{i}+{m3}{i}"
+                    set_value_cell(sheet[f"{col_letter}{i}"], f"={m1}{i}+{m2}{i}+{m3}{i}")
 
                 elif "M" in col["type"]:
                     cell_val = sheet[f"{col_letter}{i}"]
-                    # cell_val.value = col["calmonth"]
                     set_cell_val(cell_val,col_letter,query_res_for_column[col['data_type_col']],bs_calc_mapping)
 
     #    ГОД 2026               квартал 1               январь                  февраль                   март                  квартал 2               апрель                  май
