@@ -655,6 +655,17 @@ def download_report2(selected_factories,selected_reports,columns):
         11 : 'ноябрь',
         12 : 'декабрь',
     }
+
+    for index, column in enumerate(columns):
+        if 'ColumnType' not in column:
+            column['ColumnType'] = 'Selected'
+        if column.get('variantPlaning') == '2260099':
+            columns.append({
+                'ColumnType' : 'PercentOfOutput',
+                'IndexColumnForPtr' : index,
+                'ptr' : column
+            })
+
     offset_ind_col = 1
     factories_all = [row.id for row in get_data_from_query("SELECT id FROM tab_factories_d816_4")]
     if not selected_factories:
@@ -679,49 +690,71 @@ def download_report2(selected_factories,selected_reports,columns):
 
     temp_data = {}
     for col in columns:
-        type_id = int(col['typeData'])
+        if 'typeData' in col:
+            type_id = int(col['typeData'])
 
-        if type_id == 1:
-            if type_id not in temp_data:
-                temp_data[type_id] = []
+            if type_id == 1:
+                if type_id not in temp_data:
+                    temp_data[type_id] = []
 
-            temp_data[type_id].append({ 'variant_planing': col.get('variantPlaning') })
+                temp_data[type_id].append({ 'variant_planing': col.get('variantPlaning') })
 
-        else:
-            temp_data[type_id] = {'simple': True}
+            else:
+                temp_data[type_id] = {'simple': True}
 
     columns_collect = [{key: val} for key, val in temp_data.items()]
 
     columns_text = []
     # for collect in columns_collect:
     for item in columns_collect:
-        for type_id, collect in item.items():
-            if type_id == 1:
-                variants = [item['variant_planing'] for item in collect]
+            for type_id, collect in item.items():
+                if type_id == 1:
+                    variants = [item['variant_planing'] for item in collect]
 
-                query_res = get_data_from_query(
-                    'SELECT id, name FROM tab_view_var_plan_d816_4 WHERE id IN :variant_ids',
-                    {'variant_ids': tuple(variants)})
-                for row in query_res:
-                    columns_text.append({'typeData' : type_id, 'id' : row.id, 'name' : row.name})
+                    query_res = get_data_from_query(
+                        'SELECT id, name FROM tab_view_var_plan_d816_4 WHERE id IN :variant_ids',
+                        {'variant_ids': tuple(variants)})
+                    for row in query_res:
+                        columns_text.append({'typeData' : type_id, 'id' : row.id, 'name' : row.name})
 
-            elif type_id == 15:
-                query_res = get_data_from_query(
-                    'SELECT id, name FROM tab_view_io_bcblm0003_d816_4 WHERE id = :type_id',
-                    {'type_id': type_id})
-                for row in query_res:
-                    columns_text.append({'typeData' : type_id, 'id':row.id, 'name' : row.name})
+                elif type_id == 15:
+                    query_res = get_data_from_query(
+                        'SELECT id, name FROM tab_view_io_bcblm0003_d816_4 WHERE id = :type_id',
+                        {'type_id': type_id})
+                    for row in query_res:
+                        columns_text.append({'typeData' : type_id, 'id':row.id, 'name' : row.name})
 
     def get_txt_col(column):
-        if 'typeData' in column:
-            typeData = int(column.get('typeData'))
-            if typeData == 1 and 'variantPlaning' in column:
-                matched_item = next( (item for item in columns_text if int(item['id']) == int(column.get('variantPlaning'))), '' )
-                return matched_item.get('name','')
-            elif typeData == 15:
-                matched_item = next((item for item in columns_text if int(item['id']) == typeData), '')
-                return matched_item.get('name', '')
+        if 'ColumnType' in column:
+            if column.get('ColumnType') == 'Selected':
+                if 'typeData' in column:
+                    typeData = int(column.get('typeData'))
+                    if typeData == 1 and 'variantPlaning' in column:
+                        matched_item = next( (item for item in columns_text if int(item['id']) == int(column.get('variantPlaning'))), '' )
+                        return matched_item.get('name','')
+                    elif typeData == 15:
+                        matched_item = next((item for item in columns_text if int(item['id']) == typeData), '')
+                        return matched_item.get('name', '')
+            elif column.get('ColumnType') == 'PercentOfOutput':
+                return '% выхода'
         return ''
+    def get_internal_key(column, type_name):
+        if 'ColumnType' in column:
+            ColumnType = column.get('ColumnType')
+            if ColumnType == 'Selected':
+                return f"{type_name}:{column.get('typeData')}:{column.get('variantPlaning')}"
+            elif ColumnType == 'PercentOfOutput':
+                return ''
+        return ''
+    def get_index_column_layout(columns_layot, simple_key, idx):
+        col_index = 0
+        for i, col in enumerate(columns_layot):
+            if col['type'] == simple_key:
+                if idx == col_index:
+                    return i
+                else:
+                    col_index+=1
+        return 0
 
     template_name = 'Астрахань.xlsx'
     path_template = str(Path(main_folder) / Path(file_folder) / Path(template_name))
@@ -754,45 +787,100 @@ def download_report2(selected_factories,selected_reports,columns):
                 dict_bs = []
                 last_row = sheet.max_row
                 first_row = -1
+                FirstRowData = -1
                 for i in range(1, last_row + 1):
                     cell = sheet.cell(row=i, column=bs_col_index)
                     if cell.value is not None and str(cell.value).isdigit():
                         dict_bs.append(cell.value)
+                        if FirstRowData == -1:
+                            FirstRowData = i
                     if cell.value == 'ID':
                         first_row = i
-                if not dict_bs or first_row == -1:
+                if not dict_bs or first_row == -1 or FirstRowData == -1:
                     continue
 
                 loc_bs_calc_mapping = [row for row in bs_calc_mapping if row.DO == loc_settings[0].DO and row.pj == loc_settings[0].pj]
 
+                count_columns = len(columns)
+
                 columns_layout = []
                 for index_column, column in enumerate(columns):
-                    columns_layout.append({
-                        "type": f"year{column.get('dateRange')[0][-4:]}",
-                        "data_type_col": index_column,
-                        'IsNeedMerge' : True if index_column == 0 else False,
-                        'col_name' : get_txt_col(column)
-                    })
-                for q in range(1, 5):
-                    for index_column, column in enumerate(columns):
+                    ColumnType = column.get('ColumnType')
+                    if ColumnType == 'Selected':
+                        simple_key = f"year{column.get('dateRange')[0][-4:]}"
                         columns_layout.append({
-                            "type": f"Q{q}",
-                            "data_type_col":index_column,
+                            'Letter' : '',
+                            'ColumnType' : ColumnType,
+                            'type' : simple_key,
+                            'data_type_col' : index_column,
                             'IsNeedMerge' : True if index_column == 0 else False,
-                            'col_name' : get_txt_col(column)
+                            'MergeCount' : count_columns,
+                            'col_name' : get_txt_col(column),
+                            'internal_key' : get_internal_key(column, simple_key)
                         })
-
-                    for m in range(1, 4):
-                        for index_column, column in enumerate(columns):
+                    elif ColumnType == 'PercentOfOutput':
+                        if 'ptr' in column:
+                            col = column.get('ptr')
+                            simple_key = f"year{col.get('dateRange')[0][-4:]}"
                             columns_layout.append({
-                                "type": f"M{q}_{m}",
-                                "data_type_col": index_column,
-                                'IsNeedMerge' : True if index_column == 0 else False,
+                                'Letter' : '',
+                                'ColumnType' : ColumnType,
+                                'type' : simple_key,
+                                'data_type_col' : index_column,
+                                'IsNeedMerge' : False,
                                 'col_name' : get_txt_col(column),
-                                'calmonth': (q-1)*3+m
+                                'internal_key' : get_internal_key(column, simple_key),
+                                'IndexColumnForPtr': get_index_column_layout(columns_layout, simple_key,
+                                                                             column.get('IndexColumnForPtr'))
                             })
 
-                count_columns = len(columns)
+                for q in range(1, 5):
+                    for index_column, column in enumerate(columns):
+                        ColumnType = column.get('ColumnType')
+                        if ColumnType == 'Selected':
+                            simple_key = f"Q{q}"
+                            columns_layout.append({
+                                'Letter' : '',
+                                'ColumnType' : ColumnType,
+                                'type' : simple_key,
+                                'data_type_col' : index_column,
+                                'IsNeedMerge' : True if index_column == 0 else False,
+                                'MergeCount' : count_columns,
+                                'col_name' : get_txt_col(column),
+                                'internal_key': get_internal_key(column, simple_key)
+                            })
+                        elif ColumnType == 'PercentOfOutput':
+                            if 'ptr' in column:
+                                col = column.get('ptr')
+                                simple_key = f"Q{q}"
+                                columns_layout.append({
+                                    'Letter' : '',
+                                    'ColumnType' : ColumnType,
+                                    'type':  simple_key,
+                                    'data_type_col' : index_column,
+                                    'IsNeedMerge' : False,
+                                    'col_name' : get_txt_col(column),
+                                    'internal_key' : get_internal_key(column, simple_key),
+                                    'IndexColumnForPtr': get_index_column_layout(columns_layout, simple_key,
+                                                                                 column.get('IndexColumnForPtr'))
+                                })
+                    for m in range(1, 4):
+                        for index_column, column in enumerate(columns):
+                            ColumnType = column.get('ColumnType')
+                            if ColumnType == 'Selected':
+                                simple_key = f"M{q}_{m}"
+                                columns_layout.append({
+                                    'Letter' : '',
+                                    'ColumnType' : ColumnType,
+                                    'type' : simple_key,
+                                    'data_type_col' : index_column,
+                                    'IsNeedMerge' : True if index_column == 0 else False,
+                                    'MergeCount' : count_columns-1,
+                                    'col_name' : get_txt_col(column),
+                                    'calmonth' : (q-1)*3+m,
+                                    'internal_key' : get_internal_key(column, simple_key)
+                                })
+
 
                 # 'thin', 'medium', 'thick', 'double', 'dashed'
                 thin_line = Side(border_style="thin", color="000000")
@@ -809,14 +897,19 @@ def download_report2(selected_factories,selected_reports,columns):
 
                 for idx, col in enumerate(columns_layout):
                     col_num = idx + bs_col_index + 1 + offset_ind_col
+                    col['Letter'] = get_column_letter(col_num)
+                    if  'ColumnType' in col:
+                        if col['ColumnType'] == 'PercentOfOutput':
+                            col['IndexColumnForPtr'] += + bs_col_index + 1 + offset_ind_col
                     col_letter = get_column_letter(col_num)
                     sheet.column_dimensions[col_letter].width = 22 #16.29
                     cell = sheet.cell(row=first_row+1, column=col_num)
                     set_value_cell(cell,col.get('col_name'), 1)
+                    set_value_cell(sheet.cell(row=first_row+2, column=col_num), col.get('internal_key'))
 
-                    if col["IsNeedMerge"]:
+                    if col["IsNeedMerge"] and 'MergeCount' in col:
                         sheet.merge_cells(start_row=first_row, start_column=col_num, end_row=first_row,
-                                          end_column=col_num + count_columns - 1)
+                                          end_column=col_num + col["MergeCount"] - 1)
                         cell = sheet.cell(row=first_row, column=col_num)
 
                         if "year" in col["type"]:
@@ -831,15 +924,27 @@ def download_report2(selected_factories,selected_reports,columns):
                 query_res_for_column = []
                 # for column in columns:
                 for index_column, column in enumerate(columns, start=1):
-                    year = column.get('dateRange')[0][-4:]
-                    ver_plan = column.get('versionPlaning', 0)
-                    var_plan = column.get('variantPlaning', 0)
-                    do = settings[0].DO
-                    pj = settings[0].pj
-                    data_type = column.get('typeData')
-                    query_res_for_column.append(get_row_list_msb_zuv_d816_4(year, ver_plan, var_plan, dict_bs, do, pj, data_type))
+                    if column.get('ColumnType') == 'Selected':
+                        year = column.get('dateRange')[0][-4:]
+                        ver_plan = column.get('versionPlaning', 0)
+                        var_plan = column.get('variantPlaning', 0)
+                        do = settings[0].DO
+                        pj = settings[0].pj
+                        data_type = column.get('typeData')
+                        query_res_for_column.append(get_row_list_msb_zuv_d816_4(year, ver_plan, var_plan, dict_bs, do, pj, data_type))
 
-                fill_obj_column(offset_ind_col, sheet,dict_bs,bs_col_index,first_row,last_row,loc_settings,loc_bs_calc_mapping,count_columns, columns_layout, query_res_for_column)
+                fill_obj_column(offset_ind_col,
+                                sheet,
+                                dict_bs,
+                                bs_col_index,
+                                first_row,
+                                last_row,
+                                loc_settings,
+                                loc_bs_calc_mapping,
+                                count_columns,
+                                columns_layout,
+                                query_res_for_column,
+                                FirstRowData)
     #===================================================================================================================
 
     # Сохраняем подготовленные данные из шаблона
@@ -856,7 +961,19 @@ def download_report2(selected_factories,selected_reports,columns):
         download_name=filename
     )
 #============================================================================================
-def fill_obj_column(offset_ind_col, sheet,dict_bs,bs_col_index,first_row,last_row,settings, bs_calc_mapping,count_sel_column, columns_layout, query_res_for_column):
+def fill_obj_column(
+        offset_ind_col,
+        sheet,
+        dict_bs,
+        bs_col_index,
+        first_row,
+        last_row,
+        settings,
+        bs_calc_mapping,
+        count_sel_column,
+        columns_layout,
+        query_res_for_column,
+        FirstRowData):
 
     def get_col_letter_by_type(col_type, data_type_col):
         for idx, col in enumerate(columns_layout):
@@ -885,7 +1002,7 @@ def fill_obj_column(offset_ind_col, sheet,dict_bs,bs_col_index,first_row,last_ro
                 return
         return
 
-    for i in range(1, last_row + 1):
+    for i in range(FirstRowData, last_row + 1):
         cell_bs = sheet.cell(row=i, column=bs_col_index)
         if cell_bs and cell_bs.value is not None and str(cell_bs.value).isdigit():
             for idx, col in enumerate(columns_layout):
@@ -894,21 +1011,28 @@ def fill_obj_column(offset_ind_col, sheet,dict_bs,bs_col_index,first_row,last_ro
                 data_type_col = col["data_type_col"]
 
                 if "year" in col["type"]:
-                    q1 = get_col_letter_by_type("Q1", data_type_col)
-                    q2 = get_col_letter_by_type("Q2", data_type_col)
-                    q3 = get_col_letter_by_type("Q3", data_type_col)
-                    q4 = get_col_letter_by_type("Q4", data_type_col)
-                    # sheet[f"{col_letter}{i}"] = f"={q1}{i}+{q2}{i}+{q3}{i}+{q4}{i}"
-                    set_value_cell(sheet[f"{col_letter}{i}"], f"={q1}{i}+{q2}{i}+{q3}{i}+{q4}{i}")
-
+                    if col["ColumnType"] == 'Selected':
+                        q1 = get_col_letter_by_type("Q1", data_type_col)
+                        q2 = get_col_letter_by_type("Q2", data_type_col)
+                        q3 = get_col_letter_by_type("Q3", data_type_col)
+                        q4 = get_col_letter_by_type("Q4", data_type_col)
+                        set_value_cell(sheet[f"{col_letter}{i}"], f"={q1}{i}+{q2}{i}+{q3}{i}+{q4}{i}")
+                    elif col["ColumnType"] == 'PercentOfOutput':
+                        letter_col = get_column_letter(col.get('IndexColumnForPtr'))
+                        set_value_cell(sheet[f"{col_letter}{i}"],
+                                       f"={letter_col}{i}/{letter_col}{FirstRowData}*100")
                 elif "Q" in col["type"]:
                     q_num = col["type"][1]
 
-                    m1 = get_col_letter_by_type(f"M{q_num}_1", data_type_col)
-                    m2 = get_col_letter_by_type(f"M{q_num}_2", data_type_col)
-                    m3 = get_col_letter_by_type(f"M{q_num}_3", data_type_col)
-                    # sheet[f"{col_letter}{i}"] = f"={m1}{i}+{m2}{i}+{m3}{i}"
-                    set_value_cell(sheet[f"{col_letter}{i}"], f"={m1}{i}+{m2}{i}+{m3}{i}")
+                    if col["ColumnType"] == 'Selected':
+                        m1 = get_col_letter_by_type(f"M{q_num}_1", data_type_col)
+                        m2 = get_col_letter_by_type(f"M{q_num}_2", data_type_col)
+                        m3 = get_col_letter_by_type(f"M{q_num}_3", data_type_col)
+                        set_value_cell(sheet[f"{col_letter}{i}"], f"={m1}{i}+{m2}{i}+{m3}{i}")
+                    elif col["ColumnType"] == 'PercentOfOutput':
+                        letter_col = get_column_letter(col.get('IndexColumnForPtr'))
+                        set_value_cell(sheet[f"{col_letter}{i}"],
+                                       f"={letter_col}{i}/{letter_col}{FirstRowData}*100")
 
                 elif "M" in col["type"]:
                     cell_val = sheet[f"{col_letter}{i}"]

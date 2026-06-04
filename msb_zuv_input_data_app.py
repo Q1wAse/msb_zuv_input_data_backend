@@ -18,7 +18,7 @@ from flask_restx import Api, Resource, Namespace
 from flask.json.provider import DefaultJSONProvider
 from decimal import Decimal
 import datetime
-#from flask_cors import CORS
+from flask_cors import CORS
 #===================================================================================================================
 from msb_zuv_input_data_backend.namespaces.ns_input_map_bs_product import ns_input_data
 from msb_zuv_input_data_backend.namespaces.ns_download_report import ns_download_report
@@ -55,7 +55,7 @@ if database_session_pool:
 if init_logger:
     init_logger(app, app_name="msb_zuv_input_data_backend")
 #===================================================================================================================
-#CORS(app, resources={r"/*": {"origins" : "*"}})
+CORS(app, resources={r"/*": {"origins" : "*"}})
 #===================================================================================================================
 api = Api(app,
           version=Config.VERSION,
