@@ -698,11 +698,11 @@ def download_report2(selected_factories,selected_reports,columns):
 
     composite_keys_do_pj = [(row.DO, row.pj) for row in settings]
 
-    bs_calc_mapping = get_data_from_query(
-        """
-                    SELECT "DO", pj, bs, calc FROM tab_bs_calc_map_d816_4 WHERE ("DO",pj) IN :composite_keys
-                """,
-        {"composite_keys": tuple(composite_keys_do_pj)})
+    # bs_calc_mapping = get_data_from_query(
+    #     """
+    #                 SELECT "DO", pj, bs, calc FROM tab_bs_calc_map_d816_4 WHERE ("DO",pj) IN :composite_keys
+    #             """,
+    #     {"composite_keys": tuple(composite_keys_do_pj)})
 
 
     temp_data = {}
@@ -801,6 +801,7 @@ def download_report2(selected_factories,selected_reports,columns):
 
             sheet.sheet_state = 'visible'
             if sheet and bs_col_index != -1:
+                loc_bs_calc_mapping = []
                 dict_bs = []
                 last_row = sheet.max_row
                 first_row = -1
@@ -809,6 +810,11 @@ def download_report2(selected_factories,selected_reports,columns):
                     cell = sheet.cell(row=i, column=bs_col_index)
                     if cell.value is not None and str(cell.value).isdigit():
                         dict_bs.append(cell.value)
+                        cell_calc = sheet.cell(row=i, column=bs_col_index+1)
+                        loc_bs_calc_mapping.append({
+                            'bs' : cell.value,
+                            'calc' : cell_calc.value
+                        })
                         if FirstRowData == -1:
                             FirstRowData = i
                     if cell.value == 'ID':
@@ -816,7 +822,7 @@ def download_report2(selected_factories,selected_reports,columns):
                 if not dict_bs or first_row == -1 or FirstRowData == -1:
                     continue
 
-                loc_bs_calc_mapping = [row for row in bs_calc_mapping if row.DO == loc_settings[0].DO and row.pj == loc_settings[0].pj]
+                # loc_bs_calc_mapping = [row for row in bs_calc_mapping if row.DO == loc_settings[0].DO and row.pj == loc_settings[0].pj]
 
                 count_columns = len(columns)
 
@@ -1002,8 +1008,8 @@ def fill_obj_column(
 
     def set_cell_val(cell,col_letter,query_res,bs_calc_mapping):
         for map in bs_calc_mapping:
-            if map.bs == cell_bs.value and map.calc != None and map.calc != '':
-                parts = re.split(r'(\d+)', map.calc)
+            if map.get('bs') == cell_bs.value and map.get('calc') != None and map.get('calc') != '':
+                parts = re.split(r'(\d+)', map.get('calc'))
                 src_formula = "="
                 for p in parts:
                     if p.isdigit():
