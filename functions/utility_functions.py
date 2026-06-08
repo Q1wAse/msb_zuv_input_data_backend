@@ -2,13 +2,17 @@
 from enum import Enum
 from datetime import date
 from pathlib import Path
-import sys, os, io, openpyxl
+import sys, os, re, io, openpyxl
 
+from openpyxl import load_workbook
 from openpyxl.cell import Cell
 from openpyxl.utils.cell import range_boundaries
 from openpyxl.utils import get_column_letter
 from openpyxl.styles import Font, Alignment
 from openpyxl.styles import Border, Side
+
+from werkzeug.datastructures import FileStorage
+from werkzeug.utils import secure_filename
 
 from urllib.parse import parse_qs
 from decimal import Decimal
@@ -30,26 +34,36 @@ except (ImportError, ModuleNotFoundError):
 #============================================================================================
 #============================================================================================
 class EnumMsg(Enum):
-    SUCCESS         			    = 0
-    SYSTEM_ERROR			        = 1
-    INCORRECT_PARAM                 = 2
-    INCORRECT_TAB_KEY               = 3
-    INCORRECT_PATCH_INPUT_DATA      = 4
-    INCORRECT_TEMPLATE_NAME         = 5
-    NO_SELECTED_COLUMNS             = 6
-    SETTINGS_FOR_REPORT_NOT_FOUND   = 7
+    SUCCESS         			        = 0
+    SYSTEM_ERROR			            = 1
+    INCORRECT_PARAM                     = 2
+    INCORRECT_TAB_KEY                   = 3
+    INCORRECT_PATCH_INPUT_DATA          = 4
+    INCORRECT_TEMPLATE_NAME             = 5
+    NO_SELECTED_COLUMNS                 = 6
+    SETTINGS_FOR_REPORT_NOT_FOUND       = 7
+    ERROR_OPEN_TEMPLATE                 = 8
+    ERROR_SAVE_OR_PROC_TEMPLATE         = 9
+    ERROR_PERMISSION_CREATE_DIR_LINUX   = 10
+    ERROR_PERMISSION_OVERWRITE_FILE     = 11
+    ERROR_VALID_NEW_TEMPLATE            = 12
 
 #============================================================================================
 #============================================================================================
 msg_list = {
-    EnumMsg.SUCCESS		                    : { 'code' : 200, 'is_err': False,	'msg' : 'Успешное выполнение операции' },
-    EnumMsg.SYSTEM_ERROR			        : { 'code' : 500, 'is_err': True,	'msg' : 'Системная ошибка' },
-    EnumMsg.INCORRECT_PARAM			        : { 'code' : 400, 'is_err': True,	'msg' : 'Неверно задано значение для %' },
-    EnumMsg.INCORRECT_TAB_KEY		        : { 'code' : 400, 'is_err': True,	'msg' : 'Некорректное имя ключа таблицы' },
-    EnumMsg.INCORRECT_PATCH_INPUT_DATA		: { 'code' : 400, 'is_err': True,	'msg' : 'Некорректный формат обновляемых данных' },
-    EnumMsg.INCORRECT_TEMPLATE_NAME		    : { 'code' : 400, 'is_err': True,	'msg' : 'Некорректное наименование шаблона' },
-    EnumMsg.NO_SELECTED_COLUMNS		        : { 'code' : 400, 'is_err': True,	'msg' : 'Должен быть выбран хотя бы один столбец' },
-    EnumMsg.SETTINGS_FOR_REPORT_NOT_FOUND	: { 'code' : 400, 'is_err': True,	'msg' : 'Не удалось найти настройки для выбранных отчётов из таблицы: "tab_factories_d816_4"' },
+    EnumMsg.SUCCESS		                        : { 'code' : 200, 'is_err': False,	'msg' : 'Успешное выполнение операции' },
+    EnumMsg.SYSTEM_ERROR			            : { 'code' : 500, 'is_err': True,	'msg' : 'Системная ошибка' },
+    EnumMsg.INCORRECT_PARAM			            : { 'code' : 400, 'is_err': True,	'msg' : 'Неверно задано значение для %' },
+    EnumMsg.INCORRECT_TAB_KEY		            : { 'code' : 400, 'is_err': True,	'msg' : 'Некорректное имя ключа таблицы' },
+    EnumMsg.INCORRECT_PATCH_INPUT_DATA		    : { 'code' : 400, 'is_err': True,	'msg' : 'Некорректный формат обновляемых данных' },
+    EnumMsg.INCORRECT_TEMPLATE_NAME		        : { 'code' : 400, 'is_err': True,	'msg' : 'Некорректное наименование шаблона' },
+    EnumMsg.NO_SELECTED_COLUMNS		            : { 'code' : 400, 'is_err': True,	'msg' : 'Должен быть выбран хотя бы один столбец' },
+    EnumMsg.SETTINGS_FOR_REPORT_NOT_FOUND	    : { 'code' : 400, 'is_err': True,	'msg' : 'Не удалось найти настройки для выбранных отчётов из таблицы: "tab_factories_d816_4"' },
+    EnumMsg.ERROR_OPEN_TEMPLATE	                : { 'code' : 400, 'is_err': True,   'msg' : 'Не удалось прочитать, как XLSX, файл: %'},
+    EnumMsg.ERROR_SAVE_OR_PROC_TEMPLATE	        : { 'code' : 500, 'is_err': True,	'msg' : 'Ошибка при обработке или сохранении: %' },
+    EnumMsg.ERROR_PERMISSION_CREATE_DIR_LINUX	: { 'code' : 500, 'is_err': True,	'msg' : 'Нет прав на создание папки % в Linux' },
+    EnumMsg.ERROR_PERMISSION_OVERWRITE_FILE	    : { 'code' : 500, 'is_err': True,	'msg' : 'Нет прав на перезапись существующего файла шаблона' },
+    EnumMsg.ERROR_VALID_NEW_TEMPLATE	        : { 'code' : 500, 'is_err': True,	'msg' : 'Загружаемый шаблон не подходит для обработки' },
 }
 
 TABLES_MAP = {
@@ -128,7 +142,8 @@ template_setups = [
             'pj'            : 1
         }
     ]
-
+# g_report_template_name = "Астрахань.xlxs"
+g_report_template_name = "МСБ Свод (общий).xlsx"
 main_folder = "/opt/foresight/msb_zuv_input_data_backend" if sys.platform.lower() in 'linux' else os.getcwd()
 file_folder = "file"
 sql_folder = "sql"
@@ -192,6 +207,8 @@ def get_validate_param(param, field_name):
         is_valid = isinstance(value, int) and (1 <= value <= 100)
     elif field_name == "year":
         is_valid = isinstance(value, int) and (0 <= value <= 9999)
+    elif field_name == "file":
+        is_valid = not( (value is None) or (value.filename == '') )
     else:
         is_valid = True #(value is not None)
 
@@ -638,7 +655,7 @@ def set_value_cell(cell, value, LevelTitle=0):
             cell.font = formula_font
         else:
             cell.font = simple_font
-
+#============================================================================================
 def download_report2(selected_factories,selected_reports,columns):
 
     month = {
@@ -666,7 +683,7 @@ def download_report2(selected_factories,selected_reports,columns):
                 'ptr' : column
             })
 
-    offset_ind_col = 1
+    offset_ind_col = 2 #1
     factories_all = [row.id for row in get_data_from_query("SELECT id FROM tab_factories_d816_4")]
     if not selected_factories:
         selected_factories = factories_all
@@ -756,7 +773,7 @@ def download_report2(selected_factories,selected_reports,columns):
                     col_index+=1
         return 0
 
-    template_name = 'Астрахань.xlsx'
+    template_name = g_report_template_name
     path_template = str(Path(main_folder) / Path(file_folder) / Path(template_name))
 
     # Получаем рабочую книгу из шаблона
@@ -893,15 +910,17 @@ def download_report2(selected_factories,selected_reports,columns):
                     for cell in row:
                         cell.border = full_border
 
-                sheet.row_dimensions[first_row+1].height = 40
+                sheet.row_dimensions[first_row + 0].height = 20 # column title
+                sheet.row_dimensions[first_row + 1].height = 40 # column name
+                sheet.row_dimensions[first_row + 2].height = 20 # column internal_key
 
                 for idx, col in enumerate(columns_layout):
                     col_num = idx + bs_col_index + 1 + offset_ind_col
-                    col['Letter'] = get_column_letter(col_num)
+                    col_letter = get_column_letter(col_num)
+                    col['Letter'] = col_letter
                     if  'ColumnType' in col:
                         if col['ColumnType'] == 'PercentOfOutput':
                             col['IndexColumnForPtr'] += + bs_col_index + 1 + offset_ind_col
-                    col_letter = get_column_letter(col_num)
                     sheet.column_dimensions[col_letter].width = 22 #16.29
                     cell = sheet.cell(row=first_row+1, column=col_num)
                     set_value_cell(cell,col.get('col_name'), 1)
@@ -952,7 +971,7 @@ def download_report2(selected_factories,selected_reports,columns):
     # Откатываем курсор в самое начало
     buffer.seek(0)
     # имя файла
-    filename = "test_file.xlsx"
+    filename = template_name
 
     return send_file(
         buffer,
@@ -978,7 +997,7 @@ def fill_obj_column(
     def get_col_letter_by_type(col_type, data_type_col):
         for idx, col in enumerate(columns_layout):
             if col["type"] == col_type and col["data_type_col"] == data_type_col:
-                return get_column_letter(bs_col_index + idx + 1 + offset_ind_col)
+                return col.get('Letter')
         return None
 
     def set_cell_val(cell,col_letter,query_res,bs_calc_mapping):
@@ -1006,8 +1025,7 @@ def fill_obj_column(
         cell_bs = sheet.cell(row=i, column=bs_col_index)
         if cell_bs and cell_bs.value is not None and str(cell_bs.value).isdigit():
             for idx, col in enumerate(columns_layout):
-                col_num = idx + bs_col_index + 1 + offset_ind_col
-                col_letter = get_column_letter(col_num)
+                col_letter = col.get('Letter')
                 data_type_col = col["data_type_col"]
 
                 if "year" in col["type"]:
@@ -1037,9 +1055,96 @@ def fill_obj_column(
                 elif "M" in col["type"]:
                     cell_val = sheet[f"{col_letter}{i}"]
                     set_cell_val(cell_val,col_letter,query_res_for_column[col['data_type_col']],bs_calc_mapping)
-
-    #    ГОД 2026               квартал 1               январь                  февраль                   март                  квартал 2               апрель                  май
-    # [1     2       3]     [4       5       6]     [7      8       9]     [10     11      12]     [13     14      15]     [16     17      18]     [19     20      21]     [22     23      24]
-    #                                               [1      2       3]     [4       5       6]     [7       8       9]                             [10     11      12]     [13     14      15]
-
     return False
+#============================================================================================
+def get_report_template(id):
+    template_name = g_report_template_name
+    path_template = str(Path(main_folder) / Path(file_folder) / Path(template_name))
+
+    # Получаем рабочую книгу из шаблона
+    wb = openpyxl.load_workbook(path_template)
+
+    factories_all = [row.id for row in get_data_from_query("SELECT id FROM tab_factories_d816_4")]
+    for factory_id in factories_all:
+        try:
+            def_range_bs = wb.defined_names[f'_BS{factory_id}']
+        except Exception as e:
+            continue
+        for sheet_name_rng_bs, cell_coordinates_rng_bs in def_range_bs.destinations:
+            sheet = wb[sheet_name_rng_bs]
+            if id != str(factory_id):
+                sheet.sheet_state = 'veryHidden'
+                continue
+
+            sheet.sheet_state = 'visible'
+
+    # Создаём буфер для наполнения
+    buffer = io.BytesIO()
+
+    wb.save(buffer)
+    # Откатываем курсор в самое начало
+    buffer.seek(0)
+    # имя файла
+    filename = template_name
+
+    return send_file(
+        buffer,
+        mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        as_attachment=True,
+        download_name=filename
+    )
+#============================================================================================
+def upload_report_template(factory_id: str, file_storage: FileStorage):
+    # Проверка, замена левых символов в имени файла
+    safe_filename = secure_filename(file_storage.filename)
+
+    try:
+        file_bytes = file_storage.stream.read()
+        file_stream = io.BytesIO(file_bytes)
+        wb = load_workbook(filename=file_stream, read_only=False)
+
+    except Exception as e:
+        return get_msg_struct(EnumMsg.ERROR_OPEN_TEMPLATE, str(e))
+
+    try:
+        factories_all = [row.id for row in get_data_from_query("SELECT id FROM tab_factories_d816_4")]
+        if factories_all:
+            for factory_id in factories_all:
+                try:
+                    def_range_bs = wb.defined_names[f'_BS{factory_id}']
+                    def_range_ik = wb.defined_names[f'_INTERNAL_KEY{factory_id}']
+                except Exception as e:
+                    return get_msg_struct(EnumMsg.ERROR_VALID_NEW_TEMPLATE)
+
+            path_template = str(Path(main_folder) / Path(file_folder) )
+
+            base_template_dir = os.environ.get("TEMPLATE_DIR", path_template)
+
+            target_filename = f"{g_report_template_name}".lower()
+            target_path = os.path.join(base_template_dir, target_filename)
+
+            dir_to_create = os.path.dirname(target_path)
+            if not os.path.exists(dir_to_create):
+                try:
+                    os.makedirs(dir_to_create, mode=0o755, exist_ok=True)
+                except PermissionError:
+                    wb.close()
+                    return get_msg_struct(EnumMsg.ERROR_PERMISSION_CREATE_DIR_LINUX, dir_to_create)
+
+            # Перезапись существующего файла шаблона
+            if os.path.exists(target_path) and not os.access(target_path, os.W_OK):
+                wb.close()
+                return get_msg_struct(EnumMsg.ERROR_PERMISSION_OVERWRITE_FILE)
+
+            # Сохранение файла
+            wb.save(target_path)
+            wb.close()
+        else:
+            return get_msg_struct(EnumMsg.SETTINGS_FOR_REPORT_NOT_FOUND)
+
+        return get_msg_struct(EnumMsg.SUCCESS)
+
+    except Exception as e:
+        if 'wb' in locals():
+            wb.close()
+        return get_msg_struct(EnumMsg.ERROR_SAVE_OR_PROC_TEMPLATE, str(e))

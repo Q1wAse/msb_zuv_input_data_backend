@@ -167,3 +167,56 @@ class ClsStructDataDownloadReport(Resource):
             ns_download_report.abort(*errorhandler(e))
 #==============================================================================================================================
 #==============================================================================================================================
+container_get_report_template = reqparse.RequestParser()
+container_get_report_template.add_argument(
+    "factory_id",
+    type=str,
+    required=True
+)
+@ns_download_report.route('/get_template')
+class ClsDownloadTemplate(Resource):
+    @ns_download_report.expect(container_get_report_template)
+    def get(self):
+        try:
+            param_list: dict = container_get_report_template.parse_args()
+
+            uf.clear_loc_log()
+
+            v_factory_id = uf.get_validate_param(param_list, "factory_id")
+
+            return uf.get_report_template(v_factory_id)
+
+        except Exception as e:
+            ns_download_report.abort(*errorhandler(e))
+#==============================================================================================================================
+#==============================================================================================================================
+container_upload_report_template = reqparse.RequestParser()
+container_upload_report_template.add_argument(
+    "factory_id",
+    type=str,
+    required=True
+)
+container_upload_report_template.add_argument(
+    "file",
+    type=FileStorage,
+    required=True,
+    location="files"
+)
+@ns_download_report.route('/upload_template')
+class ClsUploadTemplate(Resource):
+    @ns_download_report.expect(container_upload_report_template)
+    def post(self):
+        try:
+            param_list: dict = container_upload_report_template.parse_args()
+
+            uf.clear_loc_log()
+
+            v_factory_id = uf.get_validate_param(param_list, "factory_id")
+            v_file = uf.get_validate_param(param_list, "file")
+
+            return uf.upload_report_template(v_factory_id,v_file)
+
+        except Exception as e:
+            ns_download_report.abort(*errorhandler(e))
+#==============================================================================================================================
+#==============================================================================================================================
