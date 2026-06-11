@@ -745,6 +745,8 @@ def download_report2(selected_factories,selected_reports,columns):
                             'ColumnType'        : 'SecondMinusFirst',
                             'ColumnName'        : '+ / -',
                             'IndexColumnForPtr' : index,
+                            'IsStartGroup'      : True,
+                            'GroupName'         : 'Отклонение',
                             'FormulaLink'       : {
                                 'Formula'   : '=ЕСЛИОШИБКА({}-{};"-")',
                                 'total'     : 2,
@@ -760,9 +762,11 @@ def download_report2(selected_factories,selected_reports,columns):
                             'ptr'               : column
                     })
                     columns.append({
-                            'ColumnType': 'PercentOfComplete',
-                            'ColumnName': '% вып.',
-                            'IndexColumnForPtr': index,
+                            'ColumnType'        : 'PercentOfComplete',
+                            'ColumnName'        : '% вып.',
+                            'IndexColumnForPtr' : index,
+                            'IsStartGroup'      : False,
+                            'GroupName'         : 'Отклонение',
                             'FormulaLink'       : {
                                 'Formula'   : '=ЕСЛИОШИБКА({}/{};"-")',
                                 'total'     : 2,
@@ -781,6 +785,8 @@ def download_report2(selected_factories,selected_reports,columns):
                             'ColumnType'        : 'PercentOfOutput',
                             'ColumnName'        : '% выхода',
                             'IndexColumnForPtr' : have_custom_col_calc['2260099']['IndexColumnForPtr'],
+                            'IsStartGroup'      : False,
+                            'GroupName'         : 'Отклонение',
                             'FormulaLink'       : {
                                 'Formula'   : '=ОКРУГЛ({}/{}*100;6)',  # деление текущей строки 99 на первую
                                 'total'     : 2,
@@ -897,6 +903,16 @@ def download_report2(selected_factories,selected_reports,columns):
                     FormulaLink[f'col{j}']['index'] += bs_col_index + 1 + offset_ind_col
                     FormulaLink[f'col{j}']['Letter'] = get_column_letter(FormulaLink[f'col{j}']['index'])
         return FormulaLink
+    def get_count_merge_group(columns, column):
+        count = 0
+        if column.get('IsStartGroup', False):
+            NeedGroupName = column.get('GroupName')
+            if NeedGroupName:
+                for col in columns:
+                    if 'GroupName' in col and col.get('GroupName') == NeedGroupName:
+                        count+=1
+        return count
+
     template_name = g_report_template_name
     path_template = str(Path(main_folder) / Path(file_folder) / Path(template_name))
 
@@ -973,14 +989,14 @@ def download_report2(selected_factories,selected_reports,columns):
                     if ColumnType == 'Selected':
                         simple_key = f"year{column.get('dateRange')[0][-4:]}"
                         columns_layout.append({
-                            'Letter' : '',
-                            'ColumnType' : ColumnType,
-                            'type' : simple_key,
+                            'Letter'        : '',
+                            'ColumnType'    : ColumnType,
+                            'type'          : simple_key,
                             'data_type_col' : index_column,
-                            'IsNeedMerge' : True if index_column == 0 else False,
-                            'MergeCount' : count_columns,
-                            'col_name' : get_txt_col(column),
-                            'internal_key' : get_internal_key(column, simple_key)
+                            'IsNeedMerge'   : True if index_column == 0 else False,
+                            'MergeCount'    : count_columns,
+                            'col_name'      : get_txt_col(column),
+                            'internal_key'  : get_internal_key(column, simple_key)
                         })
                     elif ColumnType in ('SecondMinusFirst','PercentOfComplete','PercentOfOutput'):
                         if 'ptr' in column:
@@ -988,14 +1004,16 @@ def download_report2(selected_factories,selected_reports,columns):
                             simple_key = f"year{col.get('dateRange')[0][-4:]}"
                             FormulaLink = copy.deepcopy(column.get('FormulaLink'))
                             columns_layout.append({
-                                'Letter' : '',
-                                'ColumnType' : ColumnType,
-                                'type' : simple_key,
+                                'Letter'        : '',
+                                'ColumnType'    : ColumnType,
+                                'type'          : simple_key,
                                 'data_type_col' : index_column,
-                                'IsNeedMerge' : False,
-                                'col_name' : get_txt_col(column),
-                                'internal_key' : get_internal_key(column, simple_key),
-                                'FormulaLink' : get_calced_formula_link_index_column_layout(
+                                'IsNeedMerge'   : column.get('IsStartGroup', False),
+                                'MergeCount'    : get_count_merge_group(columns, column),
+                                'col_name'      : get_txt_col(column),
+                                'GroupName'     : column.get('GroupName', ''),
+                                'internal_key'  : get_internal_key(column, simple_key),
+                                'FormulaLink'   : get_calced_formula_link_index_column_layout(
                                     columns_layout,
                                     simple_key,
                                     FormulaLink),
@@ -1009,13 +1027,13 @@ def download_report2(selected_factories,selected_reports,columns):
                         if ColumnType == 'Selected':
                             simple_key = f"Q{q}"
                             columns_layout.append({
-                                'Letter' : '',
-                                'ColumnType' : ColumnType,
-                                'type' : simple_key,
+                                'Letter'        : '',
+                                'ColumnType'    : ColumnType,
+                                'type'          : simple_key,
                                 'data_type_col' : index_column,
-                                'IsNeedMerge' : True if index_column == 0 else False,
-                                'MergeCount' : count_columns,
-                                'col_name' : get_txt_col(column),
+                                'IsNeedMerge'   : True if index_column == 0 else False,
+                                'MergeCount'    : count_columns,
+                                'col_name'      :  get_txt_col(column),
                                 'internal_key': get_internal_key(column, simple_key)
                             })
                         elif ColumnType in ('SecondMinusFirst','PercentOfComplete','PercentOfOutput'):
@@ -1024,14 +1042,16 @@ def download_report2(selected_factories,selected_reports,columns):
                                 simple_key = f"Q{q}"
                                 FormulaLink = copy.deepcopy(column.get('FormulaLink'))
                                 columns_layout.append({
-                                    'Letter' : '',
-                                    'ColumnType' : ColumnType,
-                                    'type':  simple_key,
+                                    'Letter'        : '',
+                                    'ColumnType'    : ColumnType,
+                                    'type'          : simple_key,
                                     'data_type_col' : index_column,
-                                    'IsNeedMerge' : False,
-                                    'col_name' : get_txt_col(column),
-                                    'internal_key' : get_internal_key(column, simple_key),
-                                    'FormulaLink': get_calced_formula_link_index_column_layout(
+                                    'IsNeedMerge'   : column.get('IsStartGroup', False),
+                                    'MergeCount'    : get_count_merge_group(columns, column),
+                                    'col_name'      : get_txt_col(column),
+                                    'GroupName'     : column.get('GroupName', ''),
+                                    'internal_key'  : get_internal_key(column, simple_key),
+                                    'FormulaLink'   : get_calced_formula_link_index_column_layout(
                                         columns_layout,
                                         simple_key,
                                         FormulaLink),
@@ -1044,15 +1064,15 @@ def download_report2(selected_factories,selected_reports,columns):
                             if ColumnType == 'Selected':
                                 simple_key = f"M{q}_{m}"
                                 columns_layout.append({
-                                    'Letter' : '',
-                                    'ColumnType' : ColumnType,
-                                    'type' : simple_key,
+                                    'Letter'        : '',
+                                    'ColumnType'    : ColumnType,
+                                    'type'          : simple_key,
                                     'data_type_col' : index_column,
-                                    'IsNeedMerge' : True if index_column == 0 else False,
-                                    'MergeCount' : count_columns-1,
-                                    'col_name' : get_txt_col(column),
-                                    'calmonth' : (q-1)*3+m,
-                                    'internal_key' : get_internal_key(column, simple_key)
+                                    'IsNeedMerge'   : True if index_column == 0 else False,
+                                    'MergeCount'    : count_columns-1,
+                                    'col_name'      : get_txt_col(column),
+                                    'calmonth'      : (q-1)*3+m,
+                                    'internal_key'  : get_internal_key(column, simple_key)
                                 })
                             elif ColumnType in ('SecondMinusFirst', 'PercentOfComplete', 'PercentOfOutput'):
                                 if 'ptr' in column:
@@ -1060,14 +1080,16 @@ def download_report2(selected_factories,selected_reports,columns):
                                     simple_key = f"M{q}_{m}"
                                     FormulaLink = copy.deepcopy(column.get('FormulaLink'))
                                     columns_layout.append({
-                                        'Letter': '',
-                                        'ColumnType': ColumnType,
-                                        'type': simple_key,
-                                        'data_type_col': index_column,
-                                        'IsNeedMerge': False,
-                                        'col_name': get_txt_col(column),
-                                        'internal_key': get_internal_key(column, simple_key),
-                                        'FormulaLink': get_calced_formula_link_index_column_layout(
+                                        'Letter'        : '',
+                                        'ColumnType'    : ColumnType,
+                                        'type'          : simple_key,
+                                        'data_type_col' : index_column,
+                                        'IsNeedMerge'   : column.get('IsStartGroup', False),
+                                        'MergeCount'    : get_count_merge_group(columns, column),
+                                        'col_name'      : get_txt_col(column),
+                                        'GroupName'     : column.get('GroupName', ''),
+                                        'internal_key'  : get_internal_key(column, simple_key),
+                                        'FormulaLink'   : get_calced_formula_link_index_column_layout(
                                             columns_layout,
                                             simple_key,
                                             FormulaLink),
@@ -1089,33 +1111,54 @@ def download_report2(selected_factories,selected_reports,columns):
 
                 sheet.row_dimensions[first_row + 0].height = 20 # column title
                 sheet.row_dimensions[first_row + 1].height = 40 # column name
-                sheet.row_dimensions[first_row + 2].height = 20 # column internal_key
+                sheet.row_dimensions[first_row + 2].height = 20 # column helper description
+                sheet.row_dimensions[first_row + 3].height = 20 # column internal_key
 
                 for idx, col in enumerate(columns_layout):
                     col_num = idx + bs_col_index + 1 + offset_ind_col
                     col_letter = get_column_letter(col_num)
                     col['Letter'] = col_letter
-                    # if  'ColumnType' in col:
-                    #     if col['ColumnType'] == 'PercentOfOutput':
-                    #         col['FormulaLink'] = add_col_index_offset(col['FormulaLink'])
-                    #         col['IndexColumnForPtr'] += + bs_col_index + 1 + offset_ind_col
+                    ColumnType = col.get('ColumnType')
+
                     sheet.column_dimensions[col_letter].width = 22 #16.29
-                    cell = sheet.cell(row=first_row+1, column=col_num)
-                    set_value_cell(cell,col.get('col_name'), EnumColumnType.TITLE_LVL0)
-                    set_value_cell(sheet.cell(row=first_row+2, column=col_num), col.get('internal_key'))
+                    if ColumnType == 'Selected':
+                        # Заголовок уровня 0
+                        cell = sheet.cell(row=first_row + 1, column=col_num)
+                        sheet.merge_cells(start_row=first_row+1, start_column=col_num, end_row=first_row+2,
+                                          end_column=col_num)
+                    else:
+                        # Заголовок уровня 1
+                        cell = sheet.cell(row=first_row + 2, column=col_num)
 
-                    if 'IsNeedMerge' in col and col['IsNeedMerge'] and 'MergeCount' in col:
-                        sheet.merge_cells(start_row=first_row, start_column=col_num, end_row=first_row,
-                                          end_column=col_num + col["MergeCount"] - 1)
-                        cell = sheet.cell(row=first_row, column=col_num)
+                    set_value_cell(cell, col.get('col_name'), EnumColumnType.TITLE_LVL0)
+                    # Заголовок уровня 2 (внутренние ключи)
+                    set_value_cell(sheet.cell(row=first_row+3, column=col_num), col.get('internal_key'))
 
-                        if "year" in col["type"]:
-                            set_value_cell(cell,col.get('type')[-4:], EnumColumnType.TITLE_LVL1)
-                        elif "Q" in col['type']:
-                            q_number = col['type'][1]
-                            set_value_cell(cell,f"{q_number} квартал", EnumColumnType.TITLE_LVL1)
-                        elif "M" in col["type"]:
-                            set_value_cell(cell,month[col.get('calmonth')], EnumColumnType.TITLE_LVL1)
+                    if 'IsNeedMerge' in col and col['IsNeedMerge']:
+                        if col.get('MergeCount', 0) > 1:
+                            if ColumnType == 'Selected':
+                                # Заголовок уровня 0
+                                sheet.merge_cells(start_row=first_row, start_column=col_num, end_row=first_row,
+                                                  end_column=col_num + col['MergeCount'] - 1)
+                            else:
+                                # Заголовок уровня 1 (на строку ниже)
+                                sheet.merge_cells(start_row=first_row+1, start_column=col_num, end_row=first_row+1,
+                                                  end_column=col_num + col['MergeCount'] - 1)
+
+                        if ColumnType == 'Selected':
+                            cell = sheet.cell(row=first_row, column=col_num)
+                            if 'year' in col['type']:
+                                set_value_cell(cell,col.get('type')[-4:], EnumColumnType.TITLE_LVL1)
+                            elif 'Q' in col['type']:
+                                q_number = col['type'][1]
+                                set_value_cell(cell,f'{q_number} квартал', EnumColumnType.TITLE_LVL1)
+                            elif 'M' in col['type']:
+                                set_value_cell(cell,month[col.get('calmonth')], EnumColumnType.TITLE_LVL1)
+                        else:
+                            GroupName = col.get('GroupName','')
+                            if GroupName:
+                                cell = sheet.cell(row=first_row+1, column=col_num)
+                                set_value_cell(cell,GroupName, EnumColumnType.TITLE_LVL1)
 
 
                 query_res_for_column = []
