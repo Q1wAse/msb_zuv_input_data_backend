@@ -15,7 +15,7 @@ API для ввода данных "Материально-стоимостно�
 
 ```bash
 python3 -m venv venv
-venv/bin/pip install flask flask-restx flask-cors flask-caching sqlalchemy psycopg2 openpyxl
+venv/bin/pip install -r requirements.txt
 ```
 
 ### 2. База данных

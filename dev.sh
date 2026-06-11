@@ -9,7 +9,7 @@ export DATABASE_URL="${DATABASE_URL:-postgresql://postgres:postgres@127.0.0.1:54
 
 if [[ ! -d "$VENV" ]]; then
   echo "❌ venv not found at $VENV"
-  echo "   Run: python3 -m venv venv && venv/bin/pip install flask flask-restx flask-cors flask-caching sqlalchemy psycopg2 openpyxl"
+  echo "   Run: python3 -m venv venv && venv/bin/pip install -r requirements.txt"
   exit 1
 fi
 
