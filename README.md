@@ -67,3 +67,4 @@ Swagger UI: http://localhost:5000/
 | Переменная   | По умолчанию                                                             | Описание                |
 |--------------|--------------------------------------------------------------------------|-------------------------|
 | DATABASE_URL | postgresql://postgres:postgres@127.0.0.1:5432/msb_zuv_input_data_tables | Строка подключения к БД |
+| MSB_DATA_DIR | <папка бэкенда> | Путь к папке с файлами (в продакшне: /opt/foresight/msb_zuv_input_data_backend) |

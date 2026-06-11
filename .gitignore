@@ -3,3 +3,6 @@ __pycache__/
 venv/
 seed/
 file/~$*
+.env.local
+.env.production
+.env

@@ -184,7 +184,10 @@ template_setups = [
     ]
 # g_report_template_name = "Астрахань.xlxs"
 g_report_template_name = "МСБ Свод (общий).xlsx"
-main_folder = "/opt/foresight/msb_zuv_input_data_backend" if sys.platform.lower() in 'linux' else os.getcwd()
+main_folder = os.environ.get(
+    'MSB_DATA_DIR',
+    "/opt/foresight/msb_zuv_input_data_backend" if sys.platform.lower() in 'linux' else os.getcwd()
+)
 file_folder = "file"
 sql_folder = "sql"
 

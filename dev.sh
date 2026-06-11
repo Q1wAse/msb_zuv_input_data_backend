@@ -5,7 +5,18 @@ BACKEND_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BACKENDS_DIR="$(dirname "$BACKEND_DIR")"
 VENV="$BACKEND_DIR/venv"
 
-export DATABASE_URL="${DATABASE_URL:-postgresql://postgres:postgres@127.0.0.1:5432/msb_zuv_input_data_tables}"
+ENV_FILE="${1:-$BACKEND_DIR/.env.local}"
+
+if [[ -f "$ENV_FILE" ]]; then
+  echo "▶ Loading env from $ENV_FILE"
+  set -o allexport
+  source "$ENV_FILE"
+  set +o allexport
+else
+  echo "⚠ Env file not found: $ENV_FILE"
+  echo "   Copy .env.example to .env.local and fill in the values"
+  exit 1
+fi
 
 if [[ ! -d "$VENV" ]]; then
   echo "❌ venv not found at $VENV"
@@ -13,8 +24,7 @@ if [[ ! -d "$VENV" ]]; then
   exit 1
 fi
 
-echo "▶ Releasing port 5000..."
-lsof -ti :5000 | xargs kill -9 2>/dev/null && echo "   killed previous instance" || echo "   port is free"
+lsof -ti :5000 | xargs kill -9 2>/dev/null || true
 
 source "$VENV/bin/activate"
 cd "$BACKENDS_DIR"
