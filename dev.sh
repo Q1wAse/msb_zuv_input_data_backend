@@ -13,6 +13,9 @@ if [[ ! -d "$VENV" ]]; then
   exit 1
 fi
 
+echo "▶ Releasing port 5000..."
+lsof -ti :5000 | xargs kill -9 2>/dev/null && echo "   killed previous instance" || echo "   port is free"
+
 source "$VENV/bin/activate"
 cd "$BACKENDS_DIR"
 python3 -m msb_zuv_input_data_backend.msb_zuv_input_data_app
