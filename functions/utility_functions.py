@@ -2,14 +2,14 @@
 from enum import Enum
 from datetime import date
 from pathlib import Path
-import sys, os, re, io, openpyxl
+import sys, os, re, io, copy, openpyxl
 
 from openpyxl import load_workbook
 from openpyxl.cell import Cell
 from openpyxl.utils.cell import range_boundaries
 from openpyxl.utils import get_column_letter
-from openpyxl.styles import Font, Alignment
-from openpyxl.styles import Border, Side
+from openpyxl.styles import Font, Alignment, numbers, Border, Side, PatternFill
+from openpyxl.formatting.rule import CellIsRule
 
 from werkzeug.datastructures import FileStorage
 from werkzeug.utils import secure_filename
@@ -26,6 +26,8 @@ from sqlalchemy.orm import scoped_session, sessionmaker
 
 from msb_zuv_input_data_backend.config import Config
 from msb_zuv_input_data_backend.database import engine_py, db_py
+
+import msb_zuv_input_data_backend.functions.formula_translator as ft
 
 try:
     from access_control_center.centrilized_database_pool import get_session
@@ -65,6 +67,17 @@ msg_list = {
     EnumMsg.ERROR_PERMISSION_OVERWRITE_FILE	    : { 'code' : 500, 'is_err': True,	'msg' : 'Нет прав на перезапись существующего файла шаблона' },
     EnumMsg.ERROR_VALID_NEW_TEMPLATE	        : { 'code' : 500, 'is_err': True,	'msg' : 'Загружаемый шаблон не подходит для обработки' },
 }
+
+class EnumColumnType(Enum):
+    TITLE_LVL0 = 0
+    TITLE_LVL1 = 1
+    INPUT = 2
+    SIMPLE_FORMULA = 3
+    PERCENT = 4
+    POSITIVE_NEGATIVE = 5
+    SECOND_MINUS_FIRST = 6
+    PERCENT_OF_COMPLETE = 7
+    PERCENT_OF_OUTPUT = 8
 
 TABLES_MAP = {
     'map_bs_product': {
@@ -618,7 +631,7 @@ def get_data_from_query(sql_text, param=None):
             return db.execute(text(sql_text)).fetchall()
     return []
 #============================================================================================
-def set_value_cell(cell, value, LevelTitle=0):
+def set_value_cell(cell, value, ColumnType:EnumColumnType=EnumColumnType.INPUT):
     simple_font = Font(
         name="Times New Roman",
         size=14,
@@ -631,31 +644,61 @@ def set_value_cell(cell, value, LevelTitle=0):
         bold=True,
         color="0000FF"
     )
-    title_font = {
-        1 : Font(
+
+    cell.value = value
+
+    if ColumnType in (EnumColumnType.TITLE_LVL0,EnumColumnType.TITLE_LVL1):
+        if EnumColumnType.TITLE_LVL0:
+            cell.font = Font(
                 name="Times New Roman",
                 size=10,
                 bold=True
-            ),
-        2 : Font(
+            )
+        elif EnumColumnType.TITLE_LVL1:
+            cell.font = Font(
                 name="Times New Roman",
                 size=14,
                 bold=True
             )
-    }
-
-    cell.value = value
-    cell.number_format = '#,##0.00'
-
-    if LevelTitle > 0:
-        cell.font = title_font[LevelTitle]
+        cell.number_format = '#,##0.00'
         cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-    else:
+    elif ColumnType == EnumColumnType.INPUT:
+        cell.number_format = '#,##0.00'
         if cell.data_type == 'f':
             cell.font = formula_font
         else:
             cell.font = simple_font
-#============================================================================================
+    elif ColumnType == EnumColumnType.SIMPLE_FORMULA:
+        cell.font = formula_font
+        cell.number_format = '#,##0.00'
+    elif ColumnType == EnumColumnType.PERCENT or ColumnType == EnumColumnType.POSITIVE_NEGATIVE:
+        set_value_cell(cell, value)
+        cell.font = formula_font
+        green_font = Font(
+            name="Times New Roman",
+            size=14,
+            color='00B050'
+        )
+        red_font = Font(
+            name="Times New Roman",
+            size=14,
+            color='C00000'
+        )
+        rule_positive = CellIsRule(
+            operator='greaterThan',
+            formula=['0'],
+            font=green_font
+        )
+        rule_negative = CellIsRule(
+            operator='lessThan',
+            formula=['0'],
+            font=red_font
+        )
+        cell.parent.conditional_formatting.add(cell.coordinate,rule_positive)
+        cell.parent.conditional_formatting.add(cell.coordinate,rule_negative)
+        if ColumnType == EnumColumnType.PERCENT:
+            cell.number_format = numbers.FORMAT_PERCENTAGE
+    #============================================================================================
 def download_report2(selected_factories,selected_reports,columns):
 
     month = {
@@ -673,15 +716,85 @@ def download_report2(selected_factories,selected_reports,columns):
         12 : 'декабрь',
     }
 
+    have_custom_col_calc = {
+        '2260099' : {
+            'Find' : False,
+            'ptr' : None,
+            'IndexColumnForPtr' : -1
+        },
+        '2260010' : {
+            'Find' : False,
+            'ptr' : None,
+            'IndexColumnForPtr' : -1
+        },
+    }
     for index, column in enumerate(columns):
         if 'ColumnType' not in column:
             column['ColumnType'] = 'Selected'
-        if column.get('variantPlaning') == '2260099':
-            columns.append({
-                'ColumnType' : 'PercentOfOutput',
-                'IndexColumnForPtr' : index,
-                'ptr' : column
-            })
+        if 'variantPlaning' in column:
+            variantPlaning = column.get('variantPlaning')
+            if variantPlaning == '2260099':
+                if have_custom_col_calc[variantPlaning]['Find'] == False:
+                    have_custom_col_calc[variantPlaning]['Find'] = True
+                    have_custom_col_calc[variantPlaning]['Ptr'] = column
+                    have_custom_col_calc[variantPlaning]['IndexColumnForPtr'] = index
+            if variantPlaning == '2260010':
+                have_custom_col_calc[variantPlaning]['Find'] = True
+                if have_custom_col_calc[variantPlaning]['Find']:
+                    columns.append({
+                            'ColumnType'        : 'SecondMinusFirst',
+                            'ColumnName'        : '+ / -',
+                            'IndexColumnForPtr' : index,
+                            'FormulaLink'       : {
+                                'Formula'   : '=ЕСЛИОШИБКА({}-{};"-")',
+                                'total'     : 2,
+                                'col1'      : {
+                                    'Letter'    : '',
+                                    'index'     : index # 10
+                                },
+                                'col2'      : {
+                                    'Letter'    : '',
+                                    'index'     : have_custom_col_calc['2260099']['IndexColumnForPtr'] # 99
+                                }
+                            },
+                            'ptr'               : column
+                    })
+                    columns.append({
+                            'ColumnType': 'PercentOfComplete',
+                            'ColumnName': '% вып.',
+                            'IndexColumnForPtr': index,
+                            'FormulaLink'       : {
+                                'Formula'   : '=ЕСЛИОШИБКА({}/{};"-")',
+                                'total'     : 2,
+                                'col1'      : {
+                                    'Letter'    : '',
+                                    'index'     : index # 10
+                                },
+                                'col2'      : {
+                                    'Letter'    : '',
+                                    'index'     : have_custom_col_calc['2260099']['IndexColumnForPtr'] # 99
+                                }
+                            },
+                            'ptr': column
+                    })
+                    columns.append({
+                            'ColumnType'        : 'PercentOfOutput',
+                            'ColumnName'        : '% выхода',
+                            'IndexColumnForPtr' : have_custom_col_calc['2260099']['IndexColumnForPtr'],
+                            'FormulaLink'       : {
+                                'Formula'   : '=ОКРУГЛ({}/{}*100;6)',  # деление текущей строки 99 на первую
+                                'total'     : 2,
+                                'col1'      : {
+                                    'Letter'    : '',
+                                    'index'  : have_custom_col_calc['2260099']['IndexColumnForPtr']  # 99
+                                },
+                                'col2'      : {
+                                    'Letter': '',
+                                    'index': have_custom_col_calc['2260099']['IndexColumnForPtr']  # 99
+                                }
+                            },
+                            'ptr': have_custom_col_calc['2260099']['Ptr']
+                    })
 
     offset_ind_col = 2 #1
     factories_all = [row.id for row in get_data_from_query("SELECT id FROM tab_factories_d816_4")]
@@ -752,27 +865,38 @@ def download_report2(selected_factories,selected_reports,columns):
                     elif typeData == 15:
                         matched_item = next((item for item in columns_text if int(item['id']) == typeData), '')
                         return matched_item.get('name', '')
-            elif column.get('ColumnType') == 'PercentOfOutput':
-                return '% выхода'
+            else:
+                if 'ColumnName' in column:
+                    return column.get('ColumnName')
         return ''
     def get_internal_key(column, type_name):
         if 'ColumnType' in column:
             ColumnType = column.get('ColumnType')
             if ColumnType == 'Selected':
                 return f"{type_name}:{column.get('typeData')}:{column.get('variantPlaning')}"
-            elif ColumnType == 'PercentOfOutput':
-                return ''
         return ''
-    def get_index_column_layout(columns_layot, simple_key, idx):
+    def get_index_column_layout(columns_layout, simple_key, idx):
         col_index = 0
-        for i, col in enumerate(columns_layot):
+        for i, col in enumerate(columns_layout):
             if col['type'] == simple_key:
                 if idx == col_index:
                     return i
                 else:
                     col_index+=1
         return 0
-
+    def get_calced_formula_link_index_column_layout(columns_layout, simple_key, formula_link):
+        FormulaLink = formula_link
+        if 'total' in FormulaLink and FormulaLink.get('total') > 0:
+            col_index = [0] * FormulaLink.get('total')
+            for j in range(1,FormulaLink.get('total')+1):
+                if f'col{j}' in FormulaLink:
+                    FormulaLink[f'col{j}']['index'] = get_index_column_layout(
+                        columns_layout,
+                        simple_key,
+                        FormulaLink.get(f'col{j}').get('index'))
+                    FormulaLink[f'col{j}']['index'] += bs_col_index + 1 + offset_ind_col
+                    FormulaLink[f'col{j}']['Letter'] = get_column_letter(FormulaLink[f'col{j}']['index'])
+        return FormulaLink
     template_name = g_report_template_name
     path_template = str(Path(main_folder) / Path(file_folder) / Path(template_name))
 
@@ -787,10 +911,15 @@ def download_report2(selected_factories,selected_reports,columns):
         loc_settings = [row for row in settings if row.id == factory_id]
         try:
             def_range_bs = wb.defined_names[f'_BS{factory_id}']
+            def_range_ik = wb.defined_names[f'_INTERNAL_KEY{factory_id}']
         except Exception as e:
             continue
         sheet_name_bs = ''
         bs_col_index = -1
+        FirstRowData = -1
+        LastRowData = -1
+        first_row = -1
+
         for sheet_name_rng_bs, cell_coordinates_rng_bs in def_range_bs.destinations:
             bs_col_index, _, _, _ = range_boundaries(cell_coordinates_rng_bs)
             sheet_name_bs = sheet_name_rng_bs
@@ -799,27 +928,39 @@ def download_report2(selected_factories,selected_reports,columns):
                 sheet.sheet_state = 'veryHidden'
                 continue
 
+            for sheet_name_rng_ik, cell_coordinates_rng_ik in def_range_ik.destinations:
+                _, FirstRowData, _, _ = range_boundaries(cell_coordinates_rng_ik)
+
+            if FirstRowData == -1:
+                continue
+            else:
+                FirstRowData += 1
+
             sheet.sheet_state = 'visible'
             if sheet and bs_col_index != -1:
                 loc_bs_calc_mapping = []
                 dict_bs = []
                 last_row = sheet.max_row
-                first_row = -1
-                FirstRowData = -1
+
+
                 for i in range(1, last_row + 1):
                     cell = sheet.cell(row=i, column=bs_col_index)
-                    if cell.value is not None and str(cell.value).isdigit():
-                        dict_bs.append(cell.value)
-                        cell_calc = sheet.cell(row=i, column=bs_col_index+1)
-                        loc_bs_calc_mapping.append({
-                            'bs' : cell.value,
-                            'calc' : cell_calc.value
-                        })
-                        if FirstRowData == -1:
-                            FirstRowData = i
-                    if cell.value == 'ID':
-                        first_row = i
-                if not dict_bs or first_row == -1 or FirstRowData == -1:
+                    if cell.value is not None:
+                        LastRowData = i
+                        if i >= FirstRowData:
+                            if str(cell.value).isdigit():
+                                dict_bs.append(cell.value)
+
+                            cell_calc = sheet.cell(row=i, column=bs_col_index + 1)
+                            if cell_calc and cell_calc.value is not None:
+                                loc_bs_calc_mapping.append({
+                                    'bs': cell.value,
+                                    'calc': cell_calc.value
+                                })
+                        elif first_row == -1 and cell.value == 'ID':
+                            first_row = i
+
+                if not dict_bs or first_row == -1:
                     continue
 
                 # loc_bs_calc_mapping = [row for row in bs_calc_mapping if row.DO == loc_settings[0].DO and row.pj == loc_settings[0].pj]
@@ -841,10 +982,11 @@ def download_report2(selected_factories,selected_reports,columns):
                             'col_name' : get_txt_col(column),
                             'internal_key' : get_internal_key(column, simple_key)
                         })
-                    elif ColumnType == 'PercentOfOutput':
+                    elif ColumnType in ('SecondMinusFirst','PercentOfComplete','PercentOfOutput'):
                         if 'ptr' in column:
                             col = column.get('ptr')
                             simple_key = f"year{col.get('dateRange')[0][-4:]}"
+                            FormulaLink = copy.deepcopy(column.get('FormulaLink'))
                             columns_layout.append({
                                 'Letter' : '',
                                 'ColumnType' : ColumnType,
@@ -853,6 +995,10 @@ def download_report2(selected_factories,selected_reports,columns):
                                 'IsNeedMerge' : False,
                                 'col_name' : get_txt_col(column),
                                 'internal_key' : get_internal_key(column, simple_key),
+                                'FormulaLink' : get_calced_formula_link_index_column_layout(
+                                    columns_layout,
+                                    simple_key,
+                                    FormulaLink),
                                 'IndexColumnForPtr': get_index_column_layout(columns_layout, simple_key,
                                                                              column.get('IndexColumnForPtr'))
                             })
@@ -872,10 +1018,11 @@ def download_report2(selected_factories,selected_reports,columns):
                                 'col_name' : get_txt_col(column),
                                 'internal_key': get_internal_key(column, simple_key)
                             })
-                        elif ColumnType == 'PercentOfOutput':
+                        elif ColumnType in ('SecondMinusFirst','PercentOfComplete','PercentOfOutput'):
                             if 'ptr' in column:
                                 col = column.get('ptr')
                                 simple_key = f"Q{q}"
+                                FormulaLink = copy.deepcopy(column.get('FormulaLink'))
                                 columns_layout.append({
                                     'Letter' : '',
                                     'ColumnType' : ColumnType,
@@ -884,6 +1031,10 @@ def download_report2(selected_factories,selected_reports,columns):
                                     'IsNeedMerge' : False,
                                     'col_name' : get_txt_col(column),
                                     'internal_key' : get_internal_key(column, simple_key),
+                                    'FormulaLink': get_calced_formula_link_index_column_layout(
+                                        columns_layout,
+                                        simple_key,
+                                        FormulaLink),
                                     'IndexColumnForPtr': get_index_column_layout(columns_layout, simple_key,
                                                                                  column.get('IndexColumnForPtr'))
                                 })
@@ -903,6 +1054,26 @@ def download_report2(selected_factories,selected_reports,columns):
                                     'calmonth' : (q-1)*3+m,
                                     'internal_key' : get_internal_key(column, simple_key)
                                 })
+                            elif ColumnType in ('SecondMinusFirst', 'PercentOfComplete', 'PercentOfOutput'):
+                                if 'ptr' in column:
+                                    col = column.get('ptr')
+                                    simple_key = f"M{q}_{m}"
+                                    FormulaLink = copy.deepcopy(column.get('FormulaLink'))
+                                    columns_layout.append({
+                                        'Letter': '',
+                                        'ColumnType': ColumnType,
+                                        'type': simple_key,
+                                        'data_type_col': index_column,
+                                        'IsNeedMerge': False,
+                                        'col_name': get_txt_col(column),
+                                        'internal_key': get_internal_key(column, simple_key),
+                                        'FormulaLink': get_calced_formula_link_index_column_layout(
+                                            columns_layout,
+                                            simple_key,
+                                            FormulaLink),
+                                        'IndexColumnForPtr': get_index_column_layout(columns_layout, simple_key,
+                                                                                     column.get('IndexColumnForPtr'))
+                                    })
 
 
                 # 'thin', 'medium', 'thick', 'double', 'dashed'
@@ -910,7 +1081,7 @@ def download_report2(selected_factories,selected_reports,columns):
                 full_border = Border(left=thin_line, right=thin_line, top=thin_line, bottom=thin_line)
                 for row in sheet.iter_rows(
                         min_row=first_row,
-                        max_row=last_row,
+                        max_row=LastRowData,
                         min_col=bs_col_index + 1 + offset_ind_col,
                         max_col=bs_col_index + 1 + offset_ind_col + len(columns_layout)-1):
                     for cell in row:
@@ -924,26 +1095,27 @@ def download_report2(selected_factories,selected_reports,columns):
                     col_num = idx + bs_col_index + 1 + offset_ind_col
                     col_letter = get_column_letter(col_num)
                     col['Letter'] = col_letter
-                    if  'ColumnType' in col:
-                        if col['ColumnType'] == 'PercentOfOutput':
-                            col['IndexColumnForPtr'] += + bs_col_index + 1 + offset_ind_col
+                    # if  'ColumnType' in col:
+                    #     if col['ColumnType'] == 'PercentOfOutput':
+                    #         col['FormulaLink'] = add_col_index_offset(col['FormulaLink'])
+                    #         col['IndexColumnForPtr'] += + bs_col_index + 1 + offset_ind_col
                     sheet.column_dimensions[col_letter].width = 22 #16.29
                     cell = sheet.cell(row=first_row+1, column=col_num)
-                    set_value_cell(cell,col.get('col_name'), 1)
+                    set_value_cell(cell,col.get('col_name'), EnumColumnType.TITLE_LVL0)
                     set_value_cell(sheet.cell(row=first_row+2, column=col_num), col.get('internal_key'))
 
-                    if col["IsNeedMerge"] and 'MergeCount' in col:
+                    if 'IsNeedMerge' in col and col['IsNeedMerge'] and 'MergeCount' in col:
                         sheet.merge_cells(start_row=first_row, start_column=col_num, end_row=first_row,
                                           end_column=col_num + col["MergeCount"] - 1)
                         cell = sheet.cell(row=first_row, column=col_num)
 
                         if "year" in col["type"]:
-                            set_value_cell(cell,col.get('type')[-4:], 2)
+                            set_value_cell(cell,col.get('type')[-4:], EnumColumnType.TITLE_LVL1)
                         elif "Q" in col['type']:
                             q_number = col['type'][1]
-                            set_value_cell(cell,f"{q_number} квартал", 2)
+                            set_value_cell(cell,f"{q_number} квартал", EnumColumnType.TITLE_LVL1)
                         elif "M" in col["type"]:
-                            set_value_cell(cell,month[col.get('calmonth')], 2)
+                            set_value_cell(cell,month[col.get('calmonth')], EnumColumnType.TITLE_LVL1)
 
 
                 query_res_for_column = []
@@ -962,14 +1134,13 @@ def download_report2(selected_factories,selected_reports,columns):
                                 sheet,
                                 dict_bs,
                                 bs_col_index,
-                                first_row,
-                                last_row,
+                                FirstRowData,
+                                LastRowData,
                                 loc_settings,
                                 loc_bs_calc_mapping,
                                 count_columns,
                                 columns_layout,
-                                query_res_for_column,
-                                FirstRowData)
+                                query_res_for_column)
     #===================================================================================================================
 
     # Сохраняем подготовленные данные из шаблона
@@ -991,14 +1162,13 @@ def fill_obj_column(
         sheet,
         dict_bs,
         bs_col_index,
-        first_row,
-        last_row,
+        FirstRowData,
+        LastRowData,
         settings,
         bs_calc_mapping,
         count_sel_column,
         columns_layout,
-        query_res_for_column,
-        FirstRowData):
+        query_res_for_column):
 
     def get_col_letter_by_type(col_type, data_type_col):
         for idx, col in enumerate(columns_layout):
@@ -1006,20 +1176,23 @@ def fill_obj_column(
                 return col.get('Letter')
         return None
 
-    def set_cell_val(cell,col_letter,query_res,bs_calc_mapping):
+    def set_calc_cell_val(cell, col_letter, query_res, bs_calc_mapping):
         for map in bs_calc_mapping:
             if map.get('bs') == cell_bs.value and map.get('calc') != None and map.get('calc') != '':
                 parts = re.split(r'(\d+)', map.get('calc'))
                 src_formula = "="
                 for p in parts:
                     if p.isdigit():
-                        for i in range(1, last_row + 1):
+                        for i in range(1, LastRowData + 1):
                             loc_cell_bs = sheet.cell(row=i, column=bs_col_index)
                             if loc_cell_bs.value == p:
                                 p = f"{col_letter}{i}"
                                 break
                     src_formula += p
-                set_value_cell(cell, src_formula)
+
+                # openpyxl не умеет в русские формулы поэтому конвертируем из русской формулы в английскую
+                # чтобы на выходе в Exel или Р7-офис формула автоматически пересчитывались (работали)
+                set_value_cell(cell, ft.convert_russian_formula(src_formula))
                 return
         for row in query_res:
             if int(row.bs) == int(cell_bs.value) and col["calmonth"] == row.calmonth:
@@ -1027,40 +1200,122 @@ def fill_obj_column(
                 return
         return
 
-    for i in range(FirstRowData, last_row + 1):
+    def get_filled_formula_by_col(col, l_col:list):
+        if 'FormulaLink' in col and 'total' in col.get('FormulaLink'):
+            FormulaLink = col.get('FormulaLink')
+            total = FormulaLink.get('total')
+            if total == len(l_col):
+                # src_formula = f"=ОКРУГЛ({letter_col}{i}/{letter_col}{FirstRowData}*100;6)"
+                src_formula = FormulaLink.get('Formula')
+                cell_address = []
+                for i in range(1, total+1):
+                    Letter = FormulaLink.get(f'col{i}').get('Letter')
+                    row = l_col[i-1]
+                    cell_address.append(f'{Letter}{row}')
+                src_formula = src_formula.format(*cell_address)
+                return src_formula
+        return ''
+
+    for i in range(FirstRowData, LastRowData + 1):
         cell_bs = sheet.cell(row=i, column=bs_col_index)
-        if cell_bs and cell_bs.value is not None and str(cell_bs.value).isdigit():
-            for idx, col in enumerate(columns_layout):
-                col_letter = col.get('Letter')
-                data_type_col = col["data_type_col"]
+        cell_calc = sheet.cell(row=i, column=bs_col_index+1)
+        if cell_bs and cell_bs.value is not None:
+            if str(cell_bs.value).isdigit():
+                for idx, col in enumerate(columns_layout):
+                    col_letter = col.get('Letter')
+                    data_type_col = col["data_type_col"]
+                    ColumnType = col["ColumnType"]
 
-                if "year" in col["type"]:
-                    if col["ColumnType"] == 'Selected':
-                        q1 = get_col_letter_by_type("Q1", data_type_col)
-                        q2 = get_col_letter_by_type("Q2", data_type_col)
-                        q3 = get_col_letter_by_type("Q3", data_type_col)
-                        q4 = get_col_letter_by_type("Q4", data_type_col)
-                        set_value_cell(sheet[f"{col_letter}{i}"], f"={q1}{i}+{q2}{i}+{q3}{i}+{q4}{i}")
-                    elif col["ColumnType"] == 'PercentOfOutput':
-                        letter_col = get_column_letter(col.get('IndexColumnForPtr'))
-                        set_value_cell(sheet[f"{col_letter}{i}"],
-                                       f"={letter_col}{i}/{letter_col}{FirstRowData}*100")
-                elif "Q" in col["type"]:
-                    q_num = col["type"][1]
+                    if "year" in col["type"]:
+                        if ColumnType == 'Selected':
+                            q1 = get_col_letter_by_type("Q1", data_type_col)
+                            q2 = get_col_letter_by_type("Q2", data_type_col)
+                            q3 = get_col_letter_by_type("Q3", data_type_col)
+                            q4 = get_col_letter_by_type("Q4", data_type_col)
+                            set_value_cell(sheet[f"{col_letter}{i}"], f"={q1}{i}+{q2}{i}+{q3}{i}+{q4}{i}")
+                        elif ColumnType == 'PercentOfOutput':
+                            src_formula = get_filled_formula_by_col(col,[i,FirstRowData])
+                            set_value_cell(sheet[f"{col_letter}{i}"],
+                                           ft.convert_russian_formula(src_formula))
+                        elif ColumnType in ('SecondMinusFirst', 'PercentOfComplete'):
+                            src_formula = get_filled_formula_by_col(col, [i, i])
+                            if ColumnType == 'SecondMinusFirst':
+                                set_value_cell(sheet[f"{col_letter}{i}"],
+                                               ft.convert_russian_formula(src_formula),
+                                               EnumColumnType.POSITIVE_NEGATIVE)
+                            elif ColumnType == 'PercentOfComplete':
+                                set_value_cell(sheet[f"{col_letter}{i}"],
+                                               ft.convert_russian_formula(src_formula),
+                                               EnumColumnType.PERCENT)
+                    elif "Q" in col["type"]:
+                        q_num = col["type"][1]
 
-                    if col["ColumnType"] == 'Selected':
-                        m1 = get_col_letter_by_type(f"M{q_num}_1", data_type_col)
-                        m2 = get_col_letter_by_type(f"M{q_num}_2", data_type_col)
-                        m3 = get_col_letter_by_type(f"M{q_num}_3", data_type_col)
-                        set_value_cell(sheet[f"{col_letter}{i}"], f"={m1}{i}+{m2}{i}+{m3}{i}")
-                    elif col["ColumnType"] == 'PercentOfOutput':
-                        letter_col = get_column_letter(col.get('IndexColumnForPtr'))
-                        set_value_cell(sheet[f"{col_letter}{i}"],
-                                       f"={letter_col}{i}/{letter_col}{FirstRowData}*100")
+                        if ColumnType == 'Selected':
+                            m1 = get_col_letter_by_type(f"M{q_num}_1", data_type_col)
+                            m2 = get_col_letter_by_type(f"M{q_num}_2", data_type_col)
+                            m3 = get_col_letter_by_type(f"M{q_num}_3", data_type_col)
+                            set_value_cell(sheet[f"{col_letter}{i}"], f"={m1}{i}+{m2}{i}+{m3}{i}")
+                        elif ColumnType == 'PercentOfOutput':
+                            src_formula = get_filled_formula_by_col(col, [i, FirstRowData])
+                            set_value_cell(sheet[f"{col_letter}{i}"],
+                                           ft.convert_russian_formula(src_formula))
+                        elif ColumnType in ('SecondMinusFirst', 'PercentOfComplete'):
+                            src_formula = get_filled_formula_by_col(col, [i, i])
+                            if ColumnType == 'SecondMinusFirst':
+                                set_value_cell(sheet[f"{col_letter}{i}"],
+                                               ft.convert_russian_formula(src_formula),
+                                               EnumColumnType.POSITIVE_NEGATIVE)
+                            elif ColumnType == 'PercentOfComplete':
+                                set_value_cell(sheet[f"{col_letter}{i}"],
+                                               ft.convert_russian_formula(src_formula),
+                                               EnumColumnType.PERCENT)
+                    elif "M" in col["type"]:
+                        if ColumnType == 'Selected':
+                            cell_val = sheet[f"{col_letter}{i}"]
+                            set_calc_cell_val(cell_val, col_letter,
+                                              query_res_for_column[data_type_col],
+                                              bs_calc_mapping)
+                        elif ColumnType == 'PercentOfOutput':
+                            src_formula = get_filled_formula_by_col(col, [i, FirstRowData])
+                            set_value_cell(sheet[f"{col_letter}{i}"],
+                                           ft.convert_russian_formula(src_formula))
+                        elif ColumnType in ('SecondMinusFirst', 'PercentOfComplete'):
+                            src_formula = get_filled_formula_by_col(col, [i, i])
+                            if ColumnType == 'SecondMinusFirst':
+                                set_value_cell(sheet[f"{col_letter}{i}"],
+                                               ft.convert_russian_formula(src_formula),
+                                               EnumColumnType.POSITIVE_NEGATIVE)
+                            elif ColumnType == 'PercentOfComplete':
+                                set_value_cell(sheet[f"{col_letter}{i}"],
+                                               ft.convert_russian_formula(src_formula),
+                                               EnumColumnType.PERCENT)
 
-                elif "M" in col["type"]:
-                    cell_val = sheet[f"{col_letter}{i}"]
-                    set_cell_val(cell_val,col_letter,query_res_for_column[col['data_type_col']],bs_calc_mapping)
+            else: # расчёт для специальных строк
+                if "T" in str(cell_bs.value):
+                    if cell_calc and cell_calc.value is not None:
+                        for idx, col in enumerate(columns_layout):
+                            col_letter = col.get('Letter')
+                            data_type_col = col["data_type_col"]
+                            ColumnType = col["ColumnType"]
+                            cell_val = sheet[f"{col_letter}{i}"]
+                            if ColumnType == 'Selected':
+                                set_calc_cell_val(cell_val, col_letter,
+                                                  query_res_for_column[data_type_col],
+                                                  bs_calc_mapping)
+                            elif ColumnType == 'PercentOfOutput':
+                                src_formula = get_filled_formula_by_col(col, [i, FirstRowData])
+                                set_value_cell(sheet[f"{col_letter}{i}"],
+                                               ft.convert_russian_formula(src_formula))
+                            elif ColumnType in ('SecondMinusFirst', 'PercentOfComplete'):
+                                src_formula = get_filled_formula_by_col(col, [i, i])
+                                if ColumnType == 'SecondMinusFirst':
+                                    set_value_cell(sheet[f"{col_letter}{i}"],
+                                                   ft.convert_russian_formula(src_formula),
+                                                   EnumColumnType.POSITIVE_NEGATIVE)
+                                elif ColumnType == 'PercentOfComplete':
+                                    set_value_cell(sheet[f"{col_letter}{i}"],
+                                                   ft.convert_russian_formula(src_formula),
+                                                   EnumColumnType.PERCENT)
     return False
 #============================================================================================
 def get_report_template(id):
