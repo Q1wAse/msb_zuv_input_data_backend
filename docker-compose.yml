@@ -1,0 +1,23 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgres:15  # Укажите версию PostgreSQL
+    container_name: local_postgres_db
+    environment:
+      POSTGRES_USER: postgres      # Имя пользователя
+      POSTGRES_PASSWORD: postgres  # Пароль для пользователя
+      POSTGRES_DB: msb_zuv_input_data_tables    # Имя базы данных
+    ports:
+      - "5432:5432"  # Проброс порта на хост
+    volumes:
+      - msb_zuv_input_data_tables:/var/lib/postgresql/data  # Персистентность данных
+    networks:
+      - mynetwork
+
+volumes:
+  msb_zuv_input_data_tables:
+
+networks:
+  mynetwork:
+    driver: bridge

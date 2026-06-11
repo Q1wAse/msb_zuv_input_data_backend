@@ -1,7 +1,11 @@
+import os
+
 class Config:
     # SQLALCHEMY_DATABASE_URI = 'postgresql+psycopg2://IS_KAO:Gamma12345%25Beta6789%23@kao-dev-db01.codm.gazprom.loc:5433/ISKAO_DATA'
-    # SQLALCHEMY_DATABASE_URI = 'postgresql://postgres:postgres@localhost:5432/msb_zuv_input_data_tables'
-    SQLALCHEMY_DATABASE_URI = 'postgresql://postgres:postgres@localhost:5433/msb_zuv_input_data'
+    SQLALCHEMY_DATABASE_URI = os.environ.get(
+        'DATABASE_URL',
+        'postgresql://postgres:postgres@localhost:5433/msb_zuv_input_data'
+    )
 
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     JSON_SORT_KEYS = False
