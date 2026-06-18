@@ -50,6 +50,12 @@ column_model = ns_download_report.model('ReportColumn', {
 })
 
 download_report_model = ns_download_report.model('ContainerReport', {
+    'selectedTypeDownload': fields.String(
+        description='Тип выгрузки',
+        required=True,
+        default='full',
+        example='full'
+    ),
     'selectedFactories': fields.List(
         fields.String,
         description='Список выбранных заводов',
@@ -106,13 +112,17 @@ class ClsDownloadReport(Resource):
             #
             # return uf.download_report(v_year,v_template_name)
 
+            v_selected_type_download = ns_download_report.payload.get('selectedTypeDownload')
             v_selected_factories = ns_download_report.payload.get('selectedFactories')
             v_selected_reports = ns_download_report.payload.get('selectedReports')
             v_columns = ns_download_report.payload.get('columns')
 
+            if not v_selected_type_download in ('full','simple'):
+                return uf.get_msg_struct(uf.EnumMsg.INCORRECT_PARAM, 'selectedTypeDownload')
+
             if v_columns:
                 v_selected_factories = [int(factory_id) for factory_id in v_selected_factories]
-                return uf.download_report2(v_selected_factories,v_selected_reports,v_columns)
+                return uf.download_report2(v_selected_type_download, v_selected_factories,v_selected_reports,v_columns)
             else:
                 return uf.get_msg_struct(uf.EnumMsg.NO_SELECTED_COLUMNS)
 

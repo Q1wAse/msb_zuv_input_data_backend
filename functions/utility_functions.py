@@ -8,8 +8,9 @@ from openpyxl import load_workbook
 from openpyxl.cell import Cell
 from openpyxl.utils.cell import range_boundaries
 from openpyxl.utils import get_column_letter
-from openpyxl.styles import Font, Alignment, numbers, Border, Side, PatternFill
-from openpyxl.formatting.rule import CellIsRule
+from openpyxl.worksheet.cell_range import MultiCellRange
+# from openpyxl.styles import Font, Alignment, numbers, Border, Side, PatternFill
+# from openpyxl.formatting.rule import CellIsRule
 
 from werkzeug.datastructures import FileStorage
 from werkzeug.utils import secure_filename
@@ -78,6 +79,32 @@ class EnumColumnType(Enum):
     SECOND_MINUS_FIRST = 6
     PERCENT_OF_COMPLETE = 7
     PERCENT_OF_OUTPUT = 8
+
+# FONT_SIMPLE = Font(name="Times New Roman", size=14, bold=True, color="000000")
+# FONT_FORMULA = Font(name="Times New Roman", size=14, bold=True, color="0000FF")
+# FONT_TITLE_LVL0 = Font(name="Times New Roman", size=10, bold=True)
+# FONT_TITLE_LVL1 = Font(name="Times New Roman", size=14, bold=True)
+# FONT_GREEN = Font(name="Times New Roman", size=14, color='00B050')
+# FONT_RED = Font(name="Times New Roman", size=14, color='C00000')
+#
+# ALIGN_CENTER = Alignment(horizontal="center", vertical="center", wrap_text=True)
+#
+# RULE_POSITIVE = CellIsRule(operator='greaterThan', formula=['0'], font=FONT_GREEN)
+# RULE_NEGATIVE = CellIsRule(operator='lessThan', formula=['0'], font=FONT_RED)
+#
+# THIN_LINE = Side(border_style="thin", color="000000")
+# FULL_BORDER = Border(left=THIN_LINE, right=THIN_LINE, top=THIN_LINE, bottom=THIN_LINE)
+
+G_STYLE_FONT_SIMPLE = None
+G_STYLE_FONT_FORMULA = None
+G_STYLE_FONT_TITLE_LVL0 = None
+G_STYLE_FONT_TITLE_LVL1 = None
+G_STYLE_FONT_GREEN = None
+G_STYLE_FONT_RED = None
+G_STYLE_RULE_POSITIVE = None
+G_STYLE_RULE_NEGATIVE = None
+G_STYLE_FULL_BORDER = None
+G_STYLE_FORMAT_PERCENTAGE = None
 
 TABLES_MAP = {
     'map_bs_product': {
@@ -631,75 +658,141 @@ def get_data_from_query(sql_text, param=None):
             return db.execute(text(sql_text)).fetchall()
     return []
 #============================================================================================
+# def set_value_cell_old(cell, value, ColumnType:EnumColumnType=EnumColumnType.INPUT):
+#     simple_font = Font(
+#         name="Times New Roman",
+#         size=14,
+#         bold=True,
+#         color="000000"
+#     )
+#     formula_font = Font(
+#         name="Times New Roman",
+#         size=14,
+#         bold=True,
+#         color="0000FF"
+#     )
+#
+#     cell.value = value
+#
+#     if ColumnType in (EnumColumnType.TITLE_LVL0,EnumColumnType.TITLE_LVL1):
+#         if EnumColumnType.TITLE_LVL0:
+#             cell.font = Font(
+#                 name="Times New Roman",
+#                 size=10,
+#                 bold=True
+#             )
+#         elif EnumColumnType.TITLE_LVL1:
+#             cell.font = Font(
+#                 name="Times New Roman",
+#                 size=14,
+#                 bold=True
+#             )
+#         cell.number_format = '#,##0.00'
+#         cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+#     elif ColumnType == EnumColumnType.INPUT:
+#         cell.number_format = '#,##0.00'
+#         if cell.data_type == 'f':
+#             cell.font = formula_font
+#         else:
+#             cell.font = simple_font
+#     elif ColumnType == EnumColumnType.SIMPLE_FORMULA:
+#         cell.font = formula_font
+#         cell.number_format = '#,##0.00'
+#     elif ColumnType == EnumColumnType.PERCENT or ColumnType == EnumColumnType.POSITIVE_NEGATIVE:
+#         set_value_cell(cell, value)
+#         cell.font = formula_font
+#         green_font = Font(
+#             name="Times New Roman",
+#             size=14,
+#             color='00B050'
+#         )
+#         red_font = Font(
+#             name="Times New Roman",
+#             size=14,
+#             color='C00000'
+#         )
+#         rule_positive = CellIsRule(
+#             operator='greaterThan',
+#             formula=['0'],
+#             font=green_font
+#         )
+#         rule_negative = CellIsRule(
+#             operator='lessThan',
+#             formula=['0'],
+#             font=red_font
+#         )
+#         cell.parent.conditional_formatting.add(cell.coordinate,rule_positive)
+#         cell.parent.conditional_formatting.add(cell.coordinate,rule_negative)
+#         if ColumnType == EnumColumnType.PERCENT:
+#             cell.number_format = numbers.FORMAT_PERCENTAGE
+#============================================================================================
 def set_value_cell(cell, value, ColumnType:EnumColumnType=EnumColumnType.INPUT):
-    simple_font = Font(
-        name="Times New Roman",
-        size=14,
-        bold=True,
-        color="000000"
-    )
-    formula_font = Font(
-        name="Times New Roman",
-        size=14,
-        bold=True,
-        color="0000FF"
-    )
+    global G_STYLE_FONT_SIMPLE, \
+        G_STYLE_FONT_FORMULA, \
+        G_STYLE_FONT_TITLE_LVL0, \
+        G_STYLE_FONT_TITLE_LVL1, \
+        G_STYLE_FONT_GREEN, \
+        G_STYLE_FONT_RED, \
+        G_STYLE_RULE_POSITIVE, \
+        G_STYLE_RULE_NEGATIVE, \
+        G_STYLE_FULL_BORDER, \
+        G_STYLE_FORMAT_PERCENTAGE
+
 
     cell.value = value
 
-    if ColumnType in (EnumColumnType.TITLE_LVL0,EnumColumnType.TITLE_LVL1):
-        if EnumColumnType.TITLE_LVL0:
-            cell.font = Font(
-                name="Times New Roman",
-                size=10,
-                bold=True
-            )
-        elif EnumColumnType.TITLE_LVL1:
-            cell.font = Font(
-                name="Times New Roman",
-                size=14,
-                bold=True
-            )
-        cell.number_format = '#,##0.00'
-        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-    elif ColumnType == EnumColumnType.INPUT:
-        cell.number_format = '#,##0.00'
-        if cell.data_type == 'f':
-            cell.font = formula_font
+    if ColumnType in (EnumColumnType.TITLE_LVL0, EnumColumnType.TITLE_LVL1):
+        if ColumnType == EnumColumnType.TITLE_LVL0:
+            chosen_style = {**G_STYLE_FONT_TITLE_LVL0}
         else:
-            cell.font = simple_font
+            chosen_style = {**G_STYLE_FONT_TITLE_LVL1}
+
+    elif ColumnType == EnumColumnType.INPUT:
+        if cell.data_type == 'f':
+            chosen_style = {**G_STYLE_FONT_FORMULA}
+        else:
+            chosen_style = {**G_STYLE_FONT_SIMPLE}
+
     elif ColumnType == EnumColumnType.SIMPLE_FORMULA:
-        cell.font = formula_font
-        cell.number_format = '#,##0.00'
-    elif ColumnType == EnumColumnType.PERCENT or ColumnType == EnumColumnType.POSITIVE_NEGATIVE:
-        set_value_cell(cell, value)
-        cell.font = formula_font
-        green_font = Font(
-            name="Times New Roman",
-            size=14,
-            color='00B050'
-        )
-        red_font = Font(
-            name="Times New Roman",
-            size=14,
-            color='C00000'
-        )
-        rule_positive = CellIsRule(
-            operator='greaterThan',
-            formula=['0'],
-            font=green_font
-        )
-        rule_negative = CellIsRule(
-            operator='lessThan',
-            formula=['0'],
-            font=red_font
-        )
-        cell.parent.conditional_formatting.add(cell.coordinate,rule_positive)
-        cell.parent.conditional_formatting.add(cell.coordinate,rule_negative)
+        chosen_style = {**G_STYLE_FONT_FORMULA}
+
+    elif ColumnType in (EnumColumnType.PERCENT, EnumColumnType.POSITIVE_NEGATIVE):
+        chosen_style = {**G_STYLE_FONT_FORMULA}
+
+        # cell.parent.conditional_formatting.add(cell.coordinate, RULE_POSITIVE)
+        # cell.parent.conditional_formatting.add(cell.coordinate, RULE_NEGATIVE)
+
         if ColumnType == EnumColumnType.PERCENT:
-            cell.number_format = numbers.FORMAT_PERCENTAGE
-    #============================================================================================
-def download_report2(selected_factories,selected_reports,columns):
+            chosen_style['number_format'] = G_STYLE_FORMAT_PERCENTAGE # тип данных строка
+    else:
+         chosen_style = {**G_STYLE_FONT_SIMPLE}
+
+    cell.font = chosen_style['font']
+    cell.alignment = chosen_style['alignment']
+    if chosen_style['border']:
+        cell.border = chosen_style['border']
+    cell.fill = chosen_style['fill']
+    cell.number_format = chosen_style['number_format']
+# #============================================================================================
+def extract_cell_styles(src_cell, with_border:bool=True):
+    return {
+        'font'          : copy.copy(src_cell.font),
+        'alignment'     : copy.copy(src_cell.alignment),
+        'border'        : copy.copy(src_cell.border) if with_border else None,
+        'fill'          : copy.copy(src_cell.fill),
+        'number_format' : src_cell.number_format
+    }
+def download_report2(type_download, selected_factories,selected_reports,columns):
+    global G_STYLE_FONT_SIMPLE, \
+        G_STYLE_FONT_FORMULA, \
+        G_STYLE_FONT_TITLE_LVL0, \
+        G_STYLE_FONT_TITLE_LVL1, \
+        G_STYLE_FONT_GREEN, \
+        G_STYLE_FONT_RED, \
+        G_STYLE_RULE_POSITIVE, \
+        G_STYLE_RULE_NEGATIVE, \
+        G_STYLE_FULL_BORDER, \
+        G_STYLE_FORMAT_PERCENTAGE
 
     month = {
         1 : 'январь',
@@ -751,12 +844,12 @@ def download_report2(selected_factories,selected_reports,columns):
                                 'Formula'   : '=ЕСЛИОШИБКА({}-{};"-")',
                                 'total'     : 2,
                                 'col1'      : {
-                                    'Letter'    : '',
-                                    'index'     : index # 10
+                                    'Letter'        : '',
+                                    'index'         : index # 10
                                 },
                                 'col2'      : {
-                                    'Letter'    : '',
-                                    'index'     : have_custom_col_calc['2260099']['IndexColumnForPtr'] # 99
+                                    'Letter'        : '',
+                                    'index'         : have_custom_col_calc['2260099']['IndexColumnForPtr'] # 99
                                 }
                             },
                             'ptr'               : column
@@ -771,12 +864,12 @@ def download_report2(selected_factories,selected_reports,columns):
                                 'Formula'   : '=ЕСЛИОШИБКА({}/{};"-")',
                                 'total'     : 2,
                                 'col1'      : {
-                                    'Letter'    : '',
-                                    'index'     : index # 10
+                                    'Letter'        : '',
+                                    'index'         : index # 10
                                 },
                                 'col2'      : {
-                                    'Letter'    : '',
-                                    'index'     : have_custom_col_calc['2260099']['IndexColumnForPtr'] # 99
+                                    'Letter'        : '',
+                                    'index'         : have_custom_col_calc['2260099']['IndexColumnForPtr'] # 99
                                 }
                             },
                             'ptr': column
@@ -791,12 +884,12 @@ def download_report2(selected_factories,selected_reports,columns):
                                 'Formula'   : '=ОКРУГЛ({}/{}*100;6)',  # деление текущей строки 99 на первую
                                 'total'     : 2,
                                 'col1'      : {
-                                    'Letter'    : '',
-                                    'index'  : have_custom_col_calc['2260099']['IndexColumnForPtr']  # 99
+                                    'Letter'        : '',
+                                    'index'         : have_custom_col_calc['2260099']['IndexColumnForPtr']  # 99
                                 },
                                 'col2'      : {
-                                    'Letter': '',
-                                    'index': have_custom_col_calc['2260099']['IndexColumnForPtr']  # 99
+                                    'Letter'        : '',
+                                    'index'         : have_custom_col_calc['2260099']['IndexColumnForPtr']  # 99
                                 }
                             },
                             'ptr': have_custom_col_calc['2260099']['Ptr']
@@ -900,8 +993,6 @@ def download_report2(selected_factories,selected_reports,columns):
                         columns_layout,
                         simple_key,
                         FormulaLink.get(f'col{j}').get('index'))
-                    FormulaLink[f'col{j}']['index'] += bs_col_index + 1 + offset_ind_col
-                    FormulaLink[f'col{j}']['Letter'] = get_column_letter(FormulaLink[f'col{j}']['index'])
         return FormulaLink
     def get_count_merge_group(columns, column):
         count = 0
@@ -923,8 +1014,172 @@ def download_report2(selected_factories,selected_reports,columns):
     buffer = io.BytesIO()
 
     #===================================================================================================================
+    ws_tech = wb['tech']
+    if ws_tech:
+        G_STYLE_FONT_SIMPLE = extract_cell_styles(ws_tech['B2'], False)
+        G_STYLE_FONT_FORMULA = extract_cell_styles(ws_tech['B3'], False)
+        G_STYLE_FONT_TITLE_LVL0 = extract_cell_styles(ws_tech['B4'], False)
+        G_STYLE_FONT_TITLE_LVL1 = extract_cell_styles(ws_tech['B5'], False)
+        G_STYLE_FONT_GREEN = extract_cell_styles(ws_tech['B6'], False)
+        G_STYLE_FONT_RED = extract_cell_styles(ws_tech['B7'], False)
+        G_STYLE_FULL_BORDER = copy.copy(ws_tech['B8'].border)
+        G_STYLE_FORMAT_PERCENTAGE = ws_tech['B9'].number_format
+
+        for cf in ws_tech.conditional_formatting:
+            for rule in cf.rules:
+                if rule.type == "cellIs":
+                    if rule.operator == "greaterThan":
+                        G_STYLE_RULE_POSITIVE = rule
+                    elif rule.operator == "lessThan":
+                        G_STYLE_RULE_NEGATIVE = rule
+
+            # Если оба правила успешно найдены, досрочно прерываем поиск ради скорости
+            if G_STYLE_RULE_POSITIVE and G_STYLE_RULE_NEGATIVE:
+                break
+    #===================================================================================================================
+    count_columns = len(columns)
+
+    columns_layout = []
+    for index_column, column in enumerate(columns):
+        ColumnType = column.get('ColumnType')
+        if ColumnType == 'Selected':
+            simple_key = f"year{column.get('dateRange')[0][-4:]}"
+            columns_layout.append({
+                'Letter': '',
+                'ColumnType': ColumnType,
+                'type': simple_key,
+                'data_type_col': index_column,
+                'IsNeedMerge': True if index_column == 0 else False,
+                'MergeCount': count_columns,
+                'col_name': get_txt_col(column),
+                'internal_key': get_internal_key(column, simple_key)
+            })
+        elif ColumnType in ('SecondMinusFirst', 'PercentOfComplete', 'PercentOfOutput'):
+            if 'ptr' in column:
+                col = column.get('ptr')
+                simple_key = f"year{col.get('dateRange')[0][-4:]}"
+                FormulaLink = copy.deepcopy(column.get('FormulaLink'))
+                columns_layout.append({
+                    'Letter': '',
+                    'ColumnType': ColumnType,
+                    'type': simple_key,
+                    'data_type_col': index_column,
+                    'IsNeedMerge': column.get('IsStartGroup', False),
+                    'MergeCount': get_count_merge_group(columns, column),
+                    'col_name': get_txt_col(column),
+                    'GroupName': column.get('GroupName', ''),
+                    'internal_key': get_internal_key(column, simple_key),
+                    'FormulaLink': get_calced_formula_link_index_column_layout(
+                        columns_layout,
+                        simple_key,
+                        FormulaLink),
+                    'IndexColumnForPtr': get_index_column_layout(columns_layout, simple_key,
+                                                                 column.get('IndexColumnForPtr'))
+                })
+
+    for q in range(1, 5):
+        for index_column, column in enumerate(columns):
+            ColumnType = column.get('ColumnType')
+            if ColumnType == 'Selected':
+                simple_key = f"Q{q}"
+                columns_layout.append({
+                    'Letter': '',
+                    'ColumnType': ColumnType,
+                    'type': simple_key,
+                    'data_type_col': index_column,
+                    'IsNeedMerge': True if index_column == 0 else False,
+                    'MergeCount': count_columns,
+                    'col_name': get_txt_col(column),
+                    'internal_key': get_internal_key(column, simple_key)
+                })
+            elif ColumnType in ('SecondMinusFirst', 'PercentOfComplete', 'PercentOfOutput'):
+                if 'ptr' in column:
+                    col = column.get('ptr')
+                    simple_key = f"Q{q}"
+                    FormulaLink = copy.deepcopy(column.get('FormulaLink'))
+                    columns_layout.append({
+                        'Letter': '',
+                        'ColumnType': ColumnType,
+                        'type': simple_key,
+                        'data_type_col': index_column,
+                        'IsNeedMerge': column.get('IsStartGroup', False),
+                        'MergeCount': get_count_merge_group(columns, column),
+                        'col_name': get_txt_col(column),
+                        'GroupName': column.get('GroupName', ''),
+                        'internal_key': get_internal_key(column, simple_key),
+                        'FormulaLink': get_calced_formula_link_index_column_layout(
+                            columns_layout,
+                            simple_key,
+                            FormulaLink),
+                        'IndexColumnForPtr': get_index_column_layout(columns_layout, simple_key,
+                                                                     column.get('IndexColumnForPtr'))
+                    })
+        for m in range(1, 4):
+            for index_column, column in enumerate(columns):
+                ColumnType = column.get('ColumnType')
+                if ColumnType == 'Selected':
+                    simple_key = f"M{q}_{m}"
+                    columns_layout.append({
+                        'Letter': '',
+                        'ColumnType': ColumnType,
+                        'type': simple_key,
+                        'data_type_col': index_column,
+                        'IsNeedMerge': True if index_column == 0 else False,
+                        'MergeCount': count_columns,
+                        'col_name': get_txt_col(column),
+                        'calmonth': (q - 1) * 3 + m,
+                        'internal_key': get_internal_key(column, simple_key)
+                    })
+                elif ColumnType in ('SecondMinusFirst', 'PercentOfComplete', 'PercentOfOutput'):
+                    if 'ptr' in column:
+                        col = column.get('ptr')
+                        simple_key = f"M{q}_{m}"
+                        FormulaLink = copy.deepcopy(column.get('FormulaLink'))
+                        columns_layout.append({
+                            'Letter': '',
+                            'ColumnType': ColumnType,
+                            'type': simple_key,
+                            'data_type_col': index_column,
+                            'IsNeedMerge': column.get('IsStartGroup', False),
+                            'MergeCount': get_count_merge_group(columns, column),
+                            'col_name': get_txt_col(column),
+                            'GroupName': column.get('GroupName', ''),
+                            'internal_key': get_internal_key(column, simple_key),
+                            'FormulaLink': get_calced_formula_link_index_column_layout(
+                                columns_layout,
+                                simple_key,
+                                FormulaLink),
+                            'IndexColumnForPtr': get_index_column_layout(columns_layout, simple_key,
+                                                                         column.get('IndexColumnForPtr'))
+                        })
+    #===================================================================================================================
+    if type_download == 'simple':
+        sheets_to_keep = set()
+
+        for factory_id in selected_factories:
+            range_name = f"_BS{factory_id}"
+            defined_name = wb.defined_names.get(range_name)
+
+            if not defined_name:
+                continue
+
+            try:
+                for sheet_title, cell_range in defined_name.destinations:
+                    if sheet_title in wb.sheetnames:
+                        sheets_to_keep.add(sheet_title)
+                    break
+            except Exception as e:
+                pass
+
+        if not sheets_to_keep:
+            return False
+
+        for sheet_name in wb.sheetnames:
+            if sheet_name not in sheets_to_keep and sheet_name != 'tech':
+                wb.remove(wb[sheet_name])
+    #===================================================================================================================
     for factory_id in factories_all:
-        loc_settings = [row for row in settings if row.id == factory_id]
+        loc_settings = next((row for row in settings if row.id == factory_id), None)
         try:
             def_range_bs = wb.defined_names[f'_BS{factory_id}']
             def_range_ik = wb.defined_names[f'_INTERNAL_KEY{factory_id}']
@@ -939,7 +1194,11 @@ def download_report2(selected_factories,selected_reports,columns):
         for sheet_name_rng_bs, cell_coordinates_rng_bs in def_range_bs.destinations:
             bs_col_index, _, _, _ = range_boundaries(cell_coordinates_rng_bs)
             sheet_name_bs = sheet_name_rng_bs
-            sheet = wb[sheet_name_bs]
+            if sheet_name_bs in wb.sheetnames:
+                sheet = wb[sheet_name_bs]
+            else:
+                continue
+
             if factory_id not in selected_factories:
                 sheet.sheet_state = 'veryHidden'
                 continue
@@ -954,6 +1213,7 @@ def download_report2(selected_factories,selected_reports,columns):
 
             sheet.sheet_state = 'visible'
             if sheet and bs_col_index != -1:
+                loc_index_offset = bs_col_index + 1 + offset_ind_col
                 loc_bs_calc_mapping = []
                 dict_bs = []
                 last_row = sheet.max_row
@@ -979,146 +1239,36 @@ def download_report2(selected_factories,selected_reports,columns):
                 if not dict_bs or first_row == -1:
                     continue
 
-                # loc_bs_calc_mapping = [row for row in bs_calc_mapping if row.DO == loc_settings[0].DO and row.pj == loc_settings[0].pj]
-
-                count_columns = len(columns)
-
-                columns_layout = []
-                for index_column, column in enumerate(columns):
-                    ColumnType = column.get('ColumnType')
-                    if ColumnType == 'Selected':
-                        simple_key = f"year{column.get('dateRange')[0][-4:]}"
-                        columns_layout.append({
-                            'Letter'        : '',
-                            'ColumnType'    : ColumnType,
-                            'type'          : simple_key,
-                            'data_type_col' : index_column,
-                            'IsNeedMerge'   : True if index_column == 0 else False,
-                            'MergeCount'    : count_columns,
-                            'col_name'      : get_txt_col(column),
-                            'internal_key'  : get_internal_key(column, simple_key)
-                        })
-                    elif ColumnType in ('SecondMinusFirst','PercentOfComplete','PercentOfOutput'):
-                        if 'ptr' in column:
-                            col = column.get('ptr')
-                            simple_key = f"year{col.get('dateRange')[0][-4:]}"
-                            FormulaLink = copy.deepcopy(column.get('FormulaLink'))
-                            columns_layout.append({
-                                'Letter'        : '',
-                                'ColumnType'    : ColumnType,
-                                'type'          : simple_key,
-                                'data_type_col' : index_column,
-                                'IsNeedMerge'   : column.get('IsStartGroup', False),
-                                'MergeCount'    : get_count_merge_group(columns, column),
-                                'col_name'      : get_txt_col(column),
-                                'GroupName'     : column.get('GroupName', ''),
-                                'internal_key'  : get_internal_key(column, simple_key),
-                                'FormulaLink'   : get_calced_formula_link_index_column_layout(
-                                    columns_layout,
-                                    simple_key,
-                                    FormulaLink),
-                                'IndexColumnForPtr': get_index_column_layout(columns_layout, simple_key,
-                                                                             column.get('IndexColumnForPtr'))
-                            })
-
-                for q in range(1, 5):
-                    for index_column, column in enumerate(columns):
-                        ColumnType = column.get('ColumnType')
-                        if ColumnType == 'Selected':
-                            simple_key = f"Q{q}"
-                            columns_layout.append({
-                                'Letter'        : '',
-                                'ColumnType'    : ColumnType,
-                                'type'          : simple_key,
-                                'data_type_col' : index_column,
-                                'IsNeedMerge'   : True if index_column == 0 else False,
-                                'MergeCount'    : count_columns,
-                                'col_name'      :  get_txt_col(column),
-                                'internal_key': get_internal_key(column, simple_key)
-                            })
-                        elif ColumnType in ('SecondMinusFirst','PercentOfComplete','PercentOfOutput'):
-                            if 'ptr' in column:
-                                col = column.get('ptr')
-                                simple_key = f"Q{q}"
-                                FormulaLink = copy.deepcopy(column.get('FormulaLink'))
-                                columns_layout.append({
-                                    'Letter'        : '',
-                                    'ColumnType'    : ColumnType,
-                                    'type'          : simple_key,
-                                    'data_type_col' : index_column,
-                                    'IsNeedMerge'   : column.get('IsStartGroup', False),
-                                    'MergeCount'    : get_count_merge_group(columns, column),
-                                    'col_name'      : get_txt_col(column),
-                                    'GroupName'     : column.get('GroupName', ''),
-                                    'internal_key'  : get_internal_key(column, simple_key),
-                                    'FormulaLink'   : get_calced_formula_link_index_column_layout(
-                                        columns_layout,
-                                        simple_key,
-                                        FormulaLink),
-                                    'IndexColumnForPtr': get_index_column_layout(columns_layout, simple_key,
-                                                                                 column.get('IndexColumnForPtr'))
-                                })
-                    for m in range(1, 4):
-                        for index_column, column in enumerate(columns):
-                            ColumnType = column.get('ColumnType')
-                            if ColumnType == 'Selected':
-                                simple_key = f"M{q}_{m}"
-                                columns_layout.append({
-                                    'Letter'        : '',
-                                    'ColumnType'    : ColumnType,
-                                    'type'          : simple_key,
-                                    'data_type_col' : index_column,
-                                    'IsNeedMerge'   : True if index_column == 0 else False,
-                                    'MergeCount'    : count_columns-1,
-                                    'col_name'      : get_txt_col(column),
-                                    'calmonth'      : (q-1)*3+m,
-                                    'internal_key'  : get_internal_key(column, simple_key)
-                                })
-                            elif ColumnType in ('SecondMinusFirst', 'PercentOfComplete', 'PercentOfOutput'):
-                                if 'ptr' in column:
-                                    col = column.get('ptr')
-                                    simple_key = f"M{q}_{m}"
-                                    FormulaLink = copy.deepcopy(column.get('FormulaLink'))
-                                    columns_layout.append({
-                                        'Letter'        : '',
-                                        'ColumnType'    : ColumnType,
-                                        'type'          : simple_key,
-                                        'data_type_col' : index_column,
-                                        'IsNeedMerge'   : column.get('IsStartGroup', False),
-                                        'MergeCount'    : get_count_merge_group(columns, column),
-                                        'col_name'      : get_txt_col(column),
-                                        'GroupName'     : column.get('GroupName', ''),
-                                        'internal_key'  : get_internal_key(column, simple_key),
-                                        'FormulaLink'   : get_calced_formula_link_index_column_layout(
-                                            columns_layout,
-                                            simple_key,
-                                            FormulaLink),
-                                        'IndexColumnForPtr': get_index_column_layout(columns_layout, simple_key,
-                                                                                     column.get('IndexColumnForPtr'))
-                                    })
-
-
-                # 'thin', 'medium', 'thick', 'double', 'dashed'
-                thin_line = Side(border_style="thin", color="000000")
-                full_border = Border(left=thin_line, right=thin_line, top=thin_line, bottom=thin_line)
-                for row in sheet.iter_rows(
-                        min_row=first_row,
-                        max_row=LastRowData,
-                        min_col=bs_col_index + 1 + offset_ind_col,
-                        max_col=bs_col_index + 1 + offset_ind_col + len(columns_layout)-1):
-                    for cell in row:
-                        cell.border = full_border
+                if G_STYLE_FULL_BORDER:
+                    _min_col = bs_col_index + 1 + offset_ind_col
+                    _max_col = bs_col_index + 1 + offset_ind_col + len(columns_layout)-1
+                    for row in sheet.iter_rows(
+                            min_row=first_row,
+                            max_row=LastRowData,
+                            min_col=_min_col,
+                            max_col=_max_col):
+                        for cell in row:
+                            cell.border = G_STYLE_FULL_BORDER
 
                 sheet.row_dimensions[first_row + 0].height = 20 # column title
                 sheet.row_dimensions[first_row + 1].height = 40 # column name
                 sheet.row_dimensions[first_row + 2].height = 20 # column helper description
                 sheet.row_dimensions[first_row + 3].height = 20 # column internal_key
 
+                multi_range_rule = MultiCellRange()
                 for idx, col in enumerate(columns_layout):
-                    col_num = idx + bs_col_index + 1 + offset_ind_col
+                    col_num = idx + loc_index_offset
                     col_letter = get_column_letter(col_num)
                     col['Letter'] = col_letter
                     ColumnType = col.get('ColumnType')
+
+                    FormulaLink = col.get('FormulaLink','')
+                    if FormulaLink:
+                        total = FormulaLink.get('total')
+                        for i in range(1, total + 1):
+                            formula_col = FormulaLink.get(f'col{i}','')
+                            if formula_col:
+                                formula_col['Letter'] = get_column_letter(formula_col['index'] + loc_index_offset)
 
                     sheet.column_dimensions[col_letter].width = 22 #16.29
                     if ColumnType == 'Selected':
@@ -1129,6 +1279,9 @@ def download_report2(selected_factories,selected_reports,columns):
                     else:
                         # Заголовок уровня 1
                         cell = sheet.cell(row=first_row + 2, column=col_num)
+                        if G_STYLE_RULE_POSITIVE and ColumnType in ('SecondMinusFirst', 'PercentOfComplete'):
+                            current_range = f'${col_letter}${FirstRowData}:${col_letter}${LastRowData}'
+                            multi_range_rule.add(current_range)
 
                     set_value_cell(cell, col.get('col_name'), EnumColumnType.TITLE_LVL0)
                     # Заголовок уровня 2 (внутренние ключи)
@@ -1160,16 +1313,19 @@ def download_report2(selected_factories,selected_reports,columns):
                                 cell = sheet.cell(row=first_row+1, column=col_num)
                                 set_value_cell(cell,GroupName, EnumColumnType.TITLE_LVL1)
 
+                if G_STYLE_RULE_POSITIVE:
+                    sheet.conditional_formatting.add(str(multi_range_rule), G_STYLE_RULE_POSITIVE)
+                if G_STYLE_RULE_NEGATIVE:
+                    sheet.conditional_formatting.add(str(multi_range_rule), G_STYLE_RULE_NEGATIVE)
 
                 query_res_for_column = []
-                # for column in columns:
                 for index_column, column in enumerate(columns, start=1):
                     if column.get('ColumnType') == 'Selected':
                         year = column.get('dateRange')[0][-4:]
                         ver_plan = column.get('versionPlaning', 0)
                         var_plan = column.get('variantPlaning', 0)
-                        do = settings[0].DO
-                        pj = settings[0].pj
+                        do = loc_settings.DO
+                        pj = loc_settings.pj
                         data_type = column.get('typeData')
                         query_res_for_column.append(get_row_list_msb_zuv_d816_4(year, ver_plan, var_plan, dict_bs, do, pj, data_type))
 
@@ -1222,16 +1378,24 @@ def fill_obj_column(
     def set_calc_cell_val(cell, col_letter, query_res, bs_calc_mapping):
         for map in bs_calc_mapping:
             if map.get('bs') == cell_bs.value and map.get('calc') != None and map.get('calc') != '':
-                parts = re.split(r'(\d+)', map.get('calc'))
-                src_formula = "="
+                parts = re.split(r'(\$?\d+)', map.get('calc'))
+                src_formula = '='
+                # src_formula = ''
                 for p in parts:
-                    if p.isdigit():
+                    FindState = 0
+                    if p.startswith('$'):
+                        p = p.replace('$', '')
+                    elif p.isdigit():
+                        FindState = 1
                         for i in range(1, LastRowData + 1):
                             loc_cell_bs = sheet.cell(row=i, column=bs_col_index)
-                            if loc_cell_bs.value == p:
-                                p = f"{col_letter}{i}"
+                            if str(loc_cell_bs.value) == p:
+                                p = f'{col_letter}{i}'
+                                FindState = 2
                                 break
-                    src_formula += p
+                    if FindState == 1:
+                        p = 0
+                    src_formula = f'{src_formula}{p}'
 
                 # openpyxl не умеет в русские формулы поэтому конвертируем из русской формулы в английскую
                 # чтобы на выходе в Exel или Р7-офис формула автоматически пересчитывались (работали)
