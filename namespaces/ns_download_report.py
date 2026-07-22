@@ -18,6 +18,7 @@ from msb_zuv_input_data_backend.database import cache, errorhandler
 from msb_zuv_input_data_backend.config import Config
 
 import msb_zuv_input_data_backend.functions.utility_functions as uf
+import msb_zuv_input_data_backend.functions.funcs_mirror as funcs_mirror
 
 #==============================================================================================================================
 #==============================================================================================================================
@@ -121,8 +122,9 @@ class ClsDownloadReport(Resource):
                 return uf.get_msg_struct(uf.EnumMsg.INCORRECT_PARAM, 'selectedTypeDownload')
 
             if v_columns:
-                v_selected_factories = [int(factory_id) for factory_id in v_selected_factories]
-                return uf.download_report2(v_selected_type_download, v_selected_factories,v_selected_reports,v_columns)
+                v_selected_factories = [factory_id for factory_id in v_selected_factories]
+                return funcs_mirror.main_download_report(v_selected_type_download, v_selected_factories,v_selected_reports,v_columns)
+                # return uf.download_report2(v_selected_type_download, v_selected_factories,v_selected_reports,v_columns)
             else:
                 return uf.get_msg_struct(uf.EnumMsg.NO_SELECTED_COLUMNS)
 
@@ -194,7 +196,7 @@ class ClsDownloadTemplate(Resource):
 
             v_factory_id = uf.get_validate_param(param_list, "factory_id")
 
-            return uf.get_report_template(v_factory_id)
+            return funcs_mirror.get_report_template(v_factory_id)
 
         except Exception as e:
             ns_download_report.abort(*errorhandler(e))
@@ -224,7 +226,7 @@ class ClsUploadTemplate(Resource):
             v_factory_id = uf.get_validate_param(param_list, "factory_id")
             v_file = uf.get_validate_param(param_list, "file")
 
-            return uf.upload_report_template(v_factory_id,v_file)
+            return funcs_mirror.upload_report_template(v_factory_id,v_file)
 
         except Exception as e:
             ns_download_report.abort(*errorhandler(e))

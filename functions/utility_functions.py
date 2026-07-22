@@ -3,14 +3,7 @@ from enum import Enum
 from datetime import date
 from pathlib import Path
 import sys, os, re, io, copy, openpyxl
-
-from openpyxl import load_workbook
-from openpyxl.cell import Cell
-from openpyxl.utils.cell import range_boundaries
-from openpyxl.utils import get_column_letter
-from openpyxl.worksheet.cell_range import MultiCellRange
-# from openpyxl.styles import Font, Alignment, numbers, Border, Side, PatternFill
-# from openpyxl.formatting.rule import CellIsRule
+from collections import defaultdict
 
 from werkzeug.datastructures import FileStorage
 from werkzeug.utils import secure_filename
@@ -18,7 +11,6 @@ from werkzeug.utils import secure_filename
 from urllib.parse import parse_qs
 from decimal import Decimal
 from flask import session, g, abort, send_file
-import re
 
 from sqlalchemy import inspect, text, exc
 from sqlalchemy.orm.attributes import InstrumentedAttribute
@@ -28,89 +20,58 @@ from sqlalchemy.orm import scoped_session, sessionmaker
 from msb_zuv_input_data_backend.config import Config
 from msb_zuv_input_data_backend.database import engine_py, db_py
 
-import msb_zuv_input_data_backend.functions.formula_translator as ft
-
 try:
     from access_control_center.centrilized_database_pool import get_session
 except (ImportError, ModuleNotFoundError):
     get_session = None
-#============================================================================================
-#============================================================================================
-class EnumMsg(Enum):
-    SUCCESS         			        = 0
-    SYSTEM_ERROR			            = 1
-    INCORRECT_PARAM                     = 2
-    INCORRECT_TAB_KEY                   = 3
-    INCORRECT_PATCH_INPUT_DATA          = 4
-    INCORRECT_TEMPLATE_NAME             = 5
-    NO_SELECTED_COLUMNS                 = 6
-    SETTINGS_FOR_REPORT_NOT_FOUND       = 7
-    ERROR_OPEN_TEMPLATE                 = 8
-    ERROR_SAVE_OR_PROC_TEMPLATE         = 9
-    ERROR_PERMISSION_CREATE_DIR_LINUX   = 10
-    ERROR_PERMISSION_OVERWRITE_FILE     = 11
-    ERROR_VALID_NEW_TEMPLATE            = 12
 
-#============================================================================================
-#============================================================================================
+
+# ============================================================================================
+# ============================================================================================
+class EnumMsg(Enum):
+    SUCCESS = 0
+    SYSTEM_ERROR = 1
+    INCORRECT_PARAM = 2
+    INCORRECT_TAB_KEY = 3
+    INCORRECT_PATCH_INPUT_DATA = 4
+    INCORRECT_TEMPLATE_NAME = 5
+    NO_SELECTED_COLUMNS = 6
+    SETTINGS_FOR_REPORT_NOT_FOUND = 7
+    ERROR_OPEN_TEMPLATE = 8
+    ERROR_SAVE_OR_PROC_TEMPLATE = 9
+    ERROR_PERMISSION_CREATE_DIR_LINUX = 10
+    ERROR_PERMISSION_OVERWRITE_FILE = 11
+    ERROR_VALID_NEW_TEMPLATE = 12
+
+
+# ============================================================================================
+# ============================================================================================
 msg_list = {
-    EnumMsg.SUCCESS		                        : { 'code' : 200, 'is_err': False,	'msg' : 'Успешное выполнение операции' },
-    EnumMsg.SYSTEM_ERROR			            : { 'code' : 500, 'is_err': True,	'msg' : 'Системная ошибка' },
-    EnumMsg.INCORRECT_PARAM			            : { 'code' : 400, 'is_err': True,	'msg' : 'Неверно задано значение для %' },
-    EnumMsg.INCORRECT_TAB_KEY		            : { 'code' : 400, 'is_err': True,	'msg' : 'Некорректное имя ключа таблицы' },
-    EnumMsg.INCORRECT_PATCH_INPUT_DATA		    : { 'code' : 400, 'is_err': True,	'msg' : 'Некорректный формат обновляемых данных' },
-    EnumMsg.INCORRECT_TEMPLATE_NAME		        : { 'code' : 400, 'is_err': True,	'msg' : 'Некорректное наименование шаблона' },
-    EnumMsg.NO_SELECTED_COLUMNS		            : { 'code' : 400, 'is_err': True,	'msg' : 'Должен быть выбран хотя бы один столбец' },
-    EnumMsg.SETTINGS_FOR_REPORT_NOT_FOUND	    : { 'code' : 400, 'is_err': True,	'msg' : 'Не удалось найти настройки для выбранных отчётов из таблицы: "tab_factories_d816_4"' },
-    EnumMsg.ERROR_OPEN_TEMPLATE	                : { 'code' : 400, 'is_err': True,   'msg' : 'Не удалось прочитать, как XLSX, файл: %'},
-    EnumMsg.ERROR_SAVE_OR_PROC_TEMPLATE	        : { 'code' : 500, 'is_err': True,	'msg' : 'Ошибка при обработке или сохранении: %' },
-    EnumMsg.ERROR_PERMISSION_CREATE_DIR_LINUX	: { 'code' : 500, 'is_err': True,	'msg' : 'Нет прав на создание папки % в Linux' },
-    EnumMsg.ERROR_PERMISSION_OVERWRITE_FILE	    : { 'code' : 500, 'is_err': True,	'msg' : 'Нет прав на перезапись существующего файла шаблона' },
-    EnumMsg.ERROR_VALID_NEW_TEMPLATE	        : { 'code' : 500, 'is_err': True,	'msg' : 'Загружаемый шаблон не подходит для обработки' },
+    EnumMsg.SUCCESS: {'code': 200, 'is_err': False, 'msg': 'Успешное выполнение операции'},
+    EnumMsg.SYSTEM_ERROR: {'code': 500, 'is_err': True, 'msg': 'Системная ошибка'},
+    EnumMsg.INCORRECT_PARAM: {'code': 400, 'is_err': True, 'msg': 'Неверно задано значение для %'},
+    EnumMsg.INCORRECT_TAB_KEY: {'code': 400, 'is_err': True, 'msg': 'Некорректное имя ключа таблицы'},
+    EnumMsg.INCORRECT_PATCH_INPUT_DATA: {'code': 400, 'is_err': True, 'msg': 'Некорректный формат обновляемых данных'},
+    EnumMsg.INCORRECT_TEMPLATE_NAME: {'code': 400, 'is_err': True, 'msg': 'Некорректное наименование шаблона'},
+    EnumMsg.NO_SELECTED_COLUMNS: {'code': 400, 'is_err': True, 'msg': 'Должен быть выбран хотя бы один столбец'},
+    EnumMsg.SETTINGS_FOR_REPORT_NOT_FOUND: {'code': 400, 'is_err': True,
+                                            'msg': 'Не удалось найти настройки для выбранных отчётов из таблицы: "tab_factories_d816_4"'},
+    EnumMsg.ERROR_OPEN_TEMPLATE: {'code': 400, 'is_err': True, 'msg': 'Не удалось прочитать, как XLSX, файл: %'},
+    EnumMsg.ERROR_SAVE_OR_PROC_TEMPLATE: {'code': 500, 'is_err': True, 'msg': 'Ошибка при обработке или сохранении: %'},
+    EnumMsg.ERROR_PERMISSION_CREATE_DIR_LINUX: {'code': 500, 'is_err': True,
+                                                'msg': 'Нет прав на создание папки % в Linux'},
+    EnumMsg.ERROR_PERMISSION_OVERWRITE_FILE: {'code': 500, 'is_err': True,
+                                              'msg': 'Нет прав на перезапись существующего файла шаблона'},
+    EnumMsg.ERROR_VALID_NEW_TEMPLATE: {'code': 500, 'is_err': True,
+                                       'msg': 'Загружаемый шаблон не подходит для обработки'},
 }
 
-class EnumColumnType(Enum):
-    TITLE_LVL0 = 0
-    TITLE_LVL1 = 1
-    INPUT = 2
-    SIMPLE_FORMULA = 3
-    PERCENT = 4
-    POSITIVE_NEGATIVE = 5
-    SECOND_MINUS_FIRST = 6
-    PERCENT_OF_COMPLETE = 7
-    PERCENT_OF_OUTPUT = 8
-
-# FONT_SIMPLE = Font(name="Times New Roman", size=14, bold=True, color="000000")
-# FONT_FORMULA = Font(name="Times New Roman", size=14, bold=True, color="0000FF")
-# FONT_TITLE_LVL0 = Font(name="Times New Roman", size=10, bold=True)
-# FONT_TITLE_LVL1 = Font(name="Times New Roman", size=14, bold=True)
-# FONT_GREEN = Font(name="Times New Roman", size=14, color='00B050')
-# FONT_RED = Font(name="Times New Roman", size=14, color='C00000')
-#
-# ALIGN_CENTER = Alignment(horizontal="center", vertical="center", wrap_text=True)
-#
-# RULE_POSITIVE = CellIsRule(operator='greaterThan', formula=['0'], font=FONT_GREEN)
-# RULE_NEGATIVE = CellIsRule(operator='lessThan', formula=['0'], font=FONT_RED)
-#
-# THIN_LINE = Side(border_style="thin", color="000000")
-# FULL_BORDER = Border(left=THIN_LINE, right=THIN_LINE, top=THIN_LINE, bottom=THIN_LINE)
-
-G_STYLE_FONT_SIMPLE = None
-G_STYLE_FONT_FORMULA = None
-G_STYLE_FONT_TITLE_LVL0 = None
-G_STYLE_FONT_TITLE_LVL1 = None
-G_STYLE_FONT_GREEN = None
-G_STYLE_FONT_RED = None
-G_STYLE_RULE_POSITIVE = None
-G_STYLE_RULE_NEGATIVE = None
-G_STYLE_FULL_BORDER = None
-G_STYLE_FORMAT_PERCENTAGE = None
 
 TABLES_MAP = {
     'map_bs_product': {
         'tab_name': 'tab_map_bs_product_d816_4',
         'fields': 'id,name,id_product,koef,factory,type_raspr,sobstv,mest',
-        'mutable' : True
+        'mutable': True
     },
     'products': {
         'tab_name': 'tab_product_d816_4',
@@ -139,84 +100,81 @@ TABLES_MAP = {
     'ost': {
         'tab_name': 'tab_ost_d816_4',
         'fields': 'id,tab_factory_d816_4_ids,tab_category_product_d816_4_ids,tab_product_d816_4_ids,value,value_korr',
-        'mutable' : True
+        'mutable': True
     },
 
-    'factories' :{
+    'factories': {
         'tab_name': 'tab_factories_d816_4',
-        'fields' : 'id,name'
+        'fields': 'id,name'
     },
-    'type_reports' :{
+    'type_reports': {
         'tab_name': 'tab_type_reports_d816_4',
-        'fields' : 'id,name'
+        'fields': 'id,name'
     },
-    'data_type' :{
+    'data_type': {
         'tab_name': 'tab_view_io_bcblm0003_d816_4',
-        'fields' : 'id,name'
+        'fields': 'id,name'
     },
-    'vers_plan' :{
+    'vers_plan': {
         'tab_name': 'tab_view_vers_plan_d816_4',
-        'fields' : 'id,name'
+        'fields': 'id,name'
     },
-    'var_plan' :{
+    'var_plan': {
         'tab_name': 'tab_view_var_plan_d816_4',
-        'fields' : 'tab_vers_plan_ids,name,id'
+        'fields': 'tab_vers_plan_ids,name,id'
+    },
+
+    'view_year': {
+        'tab_name': 'tab_view_year_d816_4',
+        'fields': 'year'
+    },
+    'view_product': {
+        'tab_name': 'tab_view_product_d816_4',
+        'fields': 'id, name'
+    },
+    'post_zuv': {
+        'tab_name': 'tab_post_zuv_d816_4',
+        'fields': 'id, name'
     }
 }
 
-template_list = [
-        'Астрахань',
-        'Сосногорск'
-    ]
-template_setups = [
-        {  # Астраханский ГПЗ
-            'index'         : 1,
-            'template_name' : 'Астрахань',
-            'do'            : 38,
-            'pj'            : 7
-        },
-        {  # Сосногорский ГПЗ
-            'index'         : 2,
-            'template_name' : 'Сосногорск',
-            'do'            : 38,
-            'pj'            : 1
-        }
-    ]
-# g_report_template_name = "Астрахань.xlxs"
-g_report_template_name = "МСБ Свод (общий).xlsx"
 main_folder = "/opt/foresight/msb_zuv_input_data_backend" if sys.platform.lower() in 'linux' else os.getcwd()
 file_folder = "file"
 sql_folder = "sql"
 
-#============================================================================================
-#============================================================================================
+# ============================================================================================
+# ============================================================================================
 gv_collect_log_status = 0
 gv_collect_log = ""
+
 
 def clear_loc_log():
     global gv_collect_log_status
     global gv_collect_log
 
     gv_collect_log_status = 0
-    gv_collect_log = ""#"\nn\nn"
+    gv_collect_log = ""  # "\nn\nn"
+
 
 def loc_log(msg):
     global gv_collect_log_status
     global gv_collect_log
 
     gv_collect_log_status = -1
-    #gv_collect_log = gv_collect_log + "\nn" + msg
+    # gv_collect_log = gv_collect_log + "\nn" + msg
     gv_collect_log = gv_collect_log + " " + msg
+
 
 def loc_log_new(func, locs, err):
     global gv_collect_log_status
     global gv_collect_log
 
     gv_collect_log_status = -1
-    #gv_collect_log = gv_collect_log + "\nn" + msg
+    # gv_collect_log = gv_collect_log + "\nn" + msg
 
     # gv_collect_log = gv_collect_log + " " + msg
-    gv_collect_log = gv_collect_log + " " +  "func::" + func + "::locs::" + str(locs) + "::" + str(err)
+    gv_collect_log = gv_collect_log + " " + "func::" + func + "::locs::" + str(locs) + "::" + str(err)
+
 
 def get_db_connection():
     if Config.SERVERBASE_MODE == 'PYTHON':
@@ -226,7 +184,9 @@ def get_db_connection():
             return get_session()
         except Exception as e:
             loc_log(str(e))
-            abort(msg_list[EnumMsg.SYSTEM_ERROR].get('code'), description=get_msg_struct(EnumMsg.SYSTEM_ERROR)[0]['message'])
+            abort(msg_list[EnumMsg.SYSTEM_ERROR].get('code'),
+                  description=get_msg_struct(EnumMsg.SYSTEM_ERROR)[0]['message'])
+
 
 def is_valid_date(date_string):
     try:
@@ -234,6 +194,7 @@ def is_valid_date(date_string):
         return True
     except ValueError:
         return False
+
 
 def get_validate_param(param, field_name):
     value = param.get(field_name)
@@ -248,15 +209,16 @@ def get_validate_param(param, field_name):
     elif field_name == "year":
         is_valid = isinstance(value, int) and (0 <= value <= 9999)
     elif field_name == "file":
-        is_valid = not( (value is None) or (value.filename == '') )
+        is_valid = not ((value is None) or (value.filename == ''))
     else:
-        is_valid = True #(value is not None)
+        is_valid = True  # (value is not None)
 
     if not is_valid:
         err_msg = get_msg_struct(EnumMsg.INCORRECT_PARAM, field_name)[0]['message']
         loc_log(err_msg)
         abort(msg_list[EnumMsg.INCORRECT_PARAM].get('code'), description=err_msg)
     return value
+
 
 def is_msg_id_valid(msg_id):
     try:
@@ -265,20 +227,22 @@ def is_msg_id_valid(msg_id):
     except ValueError:
         return False
 
-def get_msg_struct(msg_id, value = ""):
+
+def get_msg_struct(msg_id, value=""):
     msg = 'неизвестная ошибка'
     enum_msg_local = EnumMsg(msg_id) if type(msg_id) is int else msg_id
     if is_msg_id_valid(msg_id):
         msg = msg_list[enum_msg_local].get('msg')
     type_msg = 'ошибки' if msg_list[enum_msg_local].get('is_err') else 'сообщения'
     msg = 'Код ' + type_msg + ': ' + str(enum_msg_local.value) + '. ' + msg + gv_collect_log
-    msg = msg.replace('%',value)
-    return {'message' : msg }, msg_list[enum_msg_local].get('code')
+    msg = msg.replace('%', value)
+    return {'message': msg}, msg_list[enum_msg_local].get('code')
 
-def exec_sql_from_file(file_name, params = {}):
+
+def exec_sql_from_file(file_name, params={}):
     db = get_db_connection()
     if len(file_name) > 0:
-        full = Path(main_folder) / Path(sql_folder) /  file_name
+        full = Path(main_folder) / Path(sql_folder) / file_name
         if full.is_file():
             try:
                 with open(full, 'r', encoding='utf-8') as file:
@@ -288,23 +252,30 @@ def exec_sql_from_file(file_name, params = {}):
                     return query
             except Exception as e:
                 loc_log(str(e))
-                abort(msg_list[EnumMsg.SYSTEM_ERROR].get('code'), description=get_msg_struct(EnumMsg.SYSTEM_ERROR)[0]['message'])
+                abort(msg_list[EnumMsg.SYSTEM_ERROR].get('code'),
+                      description=get_msg_struct(EnumMsg.SYSTEM_ERROR)[0]['message'])
         return '-2'
     return '-1'
 
+
 def get_param_connect():
     db = get_db_connection()
-    return  db.execute(text("SELECT connection_params FROM tab_params_email_d314 WHERE system_code = 'IS_KAO_DATA'")).first()
-#============================================================================================
+    return db.execute(
+        text("SELECT connection_params FROM tab_params_email_d314 WHERE system_code = 'IS_KAO_DATA'")).first()
+
+
+# ============================================================================================
 def convert_row(row):
     result = {}
     for key, value in row.items():
         if isinstance(value, Decimal):
-            result[key] = float(value) #str(value)
+            result[key] = float(value)  # str(value)
         else:
             result[key] = value
     return result
-#============================================================================================
+
+
+# ============================================================================================
 def get_pagin_data_old(v_tab_id, v_filter, v_page, v_limit):
     db = get_db_connection()
     offset = max(0, (v_page - 1) * v_limit)
@@ -330,20 +301,22 @@ def get_pagin_data_old(v_tab_id, v_filter, v_page, v_limit):
             {cond} 
             LIMIT :limit OFFSET :offset
         """)
-        rows = db.execute(sql_text, params).mappings() #fetchall()
+        rows = db.execute(sql_text, params).mappings()  # fetchall()
         if rows:
             rows = [convert_row(row) for row in rows]
         # return [{'count' : total }, {'rows' : rows}]
-        return {'count' : total, 'rows' : rows}
+        return {'count': total, 'rows': rows}
 
     except Exception as e:
         loc_log_new(sys._getframe(0).f_code.co_name, locals(), e)
         return [0, []]
-#============================================================================================
+
+
+# ============================================================================================
 #############################################################################################
 #############################################################################################
 #############################################################################################
-#============================================================================================
+# ============================================================================================
 def get_pagin_data(v_tab_id, v_filter, v_page, v_limit):
     db = get_db_connection()
     offset = max(0, (v_page - 1) * v_limit)
@@ -369,7 +342,7 @@ def get_pagin_data(v_tab_id, v_filter, v_page, v_limit):
             {cond} 
             LIMIT :limit OFFSET :offset
         """)
-        rows = db.execute(sql_text, params).mappings() #fetchall()
+        rows = db.execute(sql_text, params).mappings()  # fetchall()
         if rows:
             rows = [convert_row(row) for row in rows]
         # return [{'count' : total }, {'rows' : rows}]
@@ -378,17 +351,20 @@ def get_pagin_data(v_tab_id, v_filter, v_page, v_limit):
     except Exception as e:
         loc_log_new(sys._getframe(0).f_code.co_name, locals(), e)
         return []
-#============================================================================================
+
+
+# ============================================================================================
 def patch_data(resource_key, data_list):
     db = get_db_connection()
     config = TABLES_MAP.get(resource_key)
 
     if not config or not isinstance(data_list, list):
-        abort(msg_list[EnumMsg.INCORRECT_PATCH_INPUT_DATA].get('code'), description=get_msg_struct(EnumMsg.INCORRECT_PATCH_INPUT_DATA)[0]['message'])
+        abort(msg_list[EnumMsg.INCORRECT_PATCH_INPUT_DATA].get('code'),
+              description=get_msg_struct(EnumMsg.INCORRECT_PATCH_INPUT_DATA)[0]['message'])
 
     results = {
-        "success"   : [],
-        "errors"    : []
+        "success": [],
+        "errors": []
     }
 
     try:
@@ -398,8 +374,8 @@ def patch_data(resource_key, data_list):
                 if not id_record:
                     results["errors"].append(
                         {
-                            "id"        : "unknown",
-                            "message"   : "ID not found"
+                            "id": "unknown",
+                            "message": "ID not found"
                         }
                     )
                     continue
@@ -428,40 +404,54 @@ def patch_data(resource_key, data_list):
                     else:
                         results["errors"].append(
                             {
-                                "id"        : id_record,
-                                "message"   : "Not found"
+                                "id": id_record,
+                                "message": "Not found"
                             }
                         )
 
         return {
-                "status"    : "completed",
-                "details"   : results
+            "status": "completed",
+            "details": results
         }
     except Exception as e:
         loc_log_new(sys._getframe(0).f_code.co_name, locals(), e)
-        abort(msg_list[EnumMsg.SYSTEM_ERROR].get('code'), description=get_msg_struct(EnumMsg.SYSTEM_ERROR)[0]['message'])
-#============================================================================================
+        abort(msg_list[EnumMsg.SYSTEM_ERROR].get('code'),
+              description=get_msg_struct(EnumMsg.SYSTEM_ERROR)[0]['message'])
+
+
+# ============================================================================================
 def map_pg_to_frontend(pg_type):
     mapping = {
-        'integer'                       : 'number',
-        'numeric'                       : 'number',
-        'real'                          : 'number',
-        'double precision'              : 'number',
-        'character varying'             : 'string',
-        'text'                          : 'string',
-        'boolean'                       : 'boolean',
-        'timestamp without time zone'   : 'datetime',
-        'date'                          : 'date'
+        'integer': 'number',
+        'numeric': 'number',
+        'real': 'number',
+        'double precision': 'number',
+        'character varying': 'string',
+        'text': 'string',
+        'boolean': 'boolean',
+        'timestamp without time zone': 'datetime',
+        'date': 'date'
     }
     return mapping.get(pg_type, 'string')
-#============================================================================================
+
+# ============================================================================================
+def get_data_from_query(sql_text, param=None):
+    db = get_db_connection()
+    if db:
+        if param:
+            return db.execute(text(sql_text), param).fetchall()
+        else:
+            return db.execute(text(sql_text)).fetchall()
+    return []
+# ============================================================================================
 def get_struct_table(key_tab):
     db = get_db_connection()
     config = TABLES_MAP.get(key_tab)
     if not config:
-        abort(msg_list[EnumMsg.INCORRECT_TAB_KEY].get('code'), description=get_msg_struct(EnumMsg.INCORRECT_TAB_KEY)[0]['message'])
+        abort(msg_list[EnumMsg.INCORRECT_TAB_KEY].get('code'),
+              description=get_msg_struct(EnumMsg.INCORRECT_TAB_KEY)[0]['message'])
 
-    field_list = { col.strip() for col in TABLES_MAP.get(key_tab).get('fields').split(',') }
+    field_list = {col.strip() for col in TABLES_MAP.get(key_tab).get('fields').split(',')}
 
     col_sql = text("""
         SELECT
@@ -477,11 +467,11 @@ def get_struct_table(key_tab):
 
     try:
         res = db.execute(col_sql,
-                   {
-                       't_name' : config.get('tab_name'),
-                       'fields' : tuple(field_list)
-                   }
-        ).fetchall()
+                         {
+                             't_name': config.get('tab_name'),
+                             'fields': tuple(field_list)
+                         }
+                         ).fetchall()
 
         res_dict = []
         for row in res:
@@ -489,10 +479,10 @@ def get_struct_table(key_tab):
             if type_data == 'number':
                 res_dict.append(
                     {
-                        row.column_name : {
-                            'type'      : type_data,
-                            'precision' : row.numeric_precision,
-                            'scale'     : row.numeric_scale
+                        row.column_name: {
+                            'type': type_data,
+                            'precision': row.numeric_precision,
+                            'scale': row.numeric_scale
                         }
                     }
                 )
@@ -510,1109 +500,5 @@ def get_struct_table(key_tab):
 
     except Exception as e:
         loc_log_new(sys._getframe(0).f_code.co_name, locals(), e)
-        abort(msg_list[EnumMsg.SYSTEM_ERROR].get('code'), description=get_msg_struct(EnumMsg.SYSTEM_ERROR)[0]['message'])
-#============================================================================================
-def get_row_list_msb_zuv_d816_4(year : int, ver_plan : int, var_plan : int, bs : list, do : int, pj : int, data_type : int):
-    db = get_db_connection()
-    col_sql = text("""
-                SELECT
-                    SUM(SUM),
-                    BS,
-                    CALYEAR, 
-                    CALQUART,
-                    CALMONTH 
-                FROM tab_integ_get_preu_mirror_d816_4 WHERE
-                    CALYEAR::INT = :year AND            -- Год планирования
-                    BCBLM0001::INT = :ver_plan AND      -- Версия планирования
-                    BCBLM0002::INT = :var_plan AND      -- Вариант планирования              
-                    BS = ANY((:bs)::int[]) AND          -- Бюджетные статьи
-                    BCBIM0002::INT = :do AND            -- Завод (Дочернее общество)
-                    pj = :pj AND                        -- Перерабатывающий комплекс (Поставщики ЖУВ)
-                    DATA_TYPE::INT = :data_type AND     -- Тип данных
-                    CALMONTH <> 0 AND
-                    DBS = 0
-                GROUP BY BS, CALYEAR, CALQUART, CALMONTH
-                ORDER by CALMONTH
-            """)
-    result = db.execute(col_sql,
-                     {
-                         'year'         : year,
-                         'ver_plan'     : ver_plan,
-                         'var_plan'     : var_plan,
-                         'bs'           : f"{{{','.join(map(str, bs))}}}",
-                         'do'           : do,
-                         'pj'           : pj,
-                         'data_type'    : data_type
-                     }
-                     ).fetchall()
-    return result
-#============================================================================================
-def download_report(year, template_name):
-    settings = [item for item in template_setups if item['template_name'] == template_name]
-    if not settings:
-        return
-
-    if settings[0].get('all', False):
-        settings = [item for item in template_setups if item['template_name'] != template_name]
-    if not settings:
-        return
-
-    template_name += '.xlsx'
-    path_template = str(Path(main_folder) / Path(file_folder) / Path(template_name))
-
-    # Получаем рабочую книгу из шаблона
-    wb = openpyxl.load_workbook(path_template)
-
-    # Создаём буфер для наполнения
-    buffer = io.BytesIO()
-
-    named_value = wb.defined_names['_YEAR']
-    if named_value:
-        named_value.value = year
-
-    #for index, item in enumerate(settings, start=1):
-    for item in settings:
-        do = item.get('do')
-        pj = item.get('pj')
-        index = item.get('index')
-
-        def_range_bs = wb.defined_names[f'_BS{index}']
-        if not def_range_bs:
-            continue
-
-        bs_col_index = -1
-        dict_month_col_index = []
-        sheet_name = ''
-        for sheet_name_rng_bs, cell_coordinates in def_range_bs.destinations:
-            bs_col_index, _, _, _ = range_boundaries(cell_coordinates)
-            sheet_name = sheet_name_rng_bs
-        for i in range(1, 13):
-            def_range_month = wb.defined_names[f'_MONTH{index}_{i}']
-            for sheet_name_rng_month, cell_coordinates in def_range_month.destinations:
-                min_col, _, _, _ = range_boundaries(cell_coordinates)
-                dict_month_col_index.append(min_col)
-
-        if bs_col_index != -1 and sheet_name and len(dict_month_col_index) == 12:
-            dict_bs = []
-            sheet = wb[sheet_name]
-            if not sheet:
-                continue
-
-            last_row = sheet.max_row
-            for i in range(1, last_row + 1):
-                cell = sheet.cell(row=i,column=bs_col_index)
-                if cell.value is not None and str(cell.value).isdigit():
-                    dict_bs.append(cell.value)
-            if not dict_bs:
-                continue
-
-            query_plan_99_res = get_row_list_msb_zuv_d816_4(year, 22600, 2260099, dict_bs, do, pj, 1)
-            query_plan_10_res = get_row_list_msb_zuv_d816_4(year, 22600, 2260010, dict_bs, do, pj, 1)
-            query_fact_res = get_row_list_msb_zuv_d816_4(year, 0, 0, dict_bs, do, pj, 15)
-
-            for i in range(1, last_row + 1):
-                cell_bs = sheet.cell(row=i, column=bs_col_index)
-                if cell_bs and cell_bs.value is not None and str(cell_bs.value).isdigit():
-                    # for month_col in dict_month_col_index:
-                    for ind, it in enumerate(dict_month_col_index, start=1):
-                        for row in query_plan_99_res:
-                            cell_val = sheet.cell(row=i, column=it)
-                            if cell_val and cell_val.data_type == 'f':
-                                continue
-                            if int(row.bs) == int(cell_bs.value) and ind == row.calmonth:
-                                cell_val.value = row.sum
-                        for row in query_plan_10_res:
-                            cell_val = sheet.cell(row=i, column=it+1)
-                            if cell_val and cell_val.data_type == 'f':
-                                continue
-                            if int(row.bs) == int(cell_bs.value) and ind == row.calmonth:
-                                cell_val.value = row.sum
-                        for row in query_fact_res:
-                            cell_val = sheet.cell(row=i , column=it+2)
-                            if cell_val and cell_val.data_type == 'f':
-                                continue
-                            if int(row.bs) == int(cell_bs.value) and ind == row.calmonth:
-                                cell_val.value = row.sum
-
-
-    # Сохраняем подготовленные данные из шаблона
-    wb.save(buffer)
-    # Откатываем курсор в самое начало
-    buffer.seek(0)
-    # имя файла
-    filename = template_name # "test_file.xlsx"
-
-    return send_file(
-            buffer,
-            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-            as_attachment=True,
-            download_name=filename
-        )
-#============================================================================================
-def get_data_from_query(sql_text, param=None):
-    db = get_db_connection()
-    if db:
-        if param:
-            return db.execute(text(sql_text), param).fetchall()
-        else:
-            return db.execute(text(sql_text)).fetchall()
-    return []
-#============================================================================================
-# def set_value_cell_old(cell, value, ColumnType:EnumColumnType=EnumColumnType.INPUT):
-#     simple_font = Font(
-#         name="Times New Roman",
-#         size=14,
-#         bold=True,
-#         color="000000"
-#     )
-#     formula_font = Font(
-#         name="Times New Roman",
-#         size=14,
-#         bold=True,
-#         color="0000FF"
-#     )
-#
-#     cell.value = value
-#
-#     if ColumnType in (EnumColumnType.TITLE_LVL0,EnumColumnType.TITLE_LVL1):
-#         if EnumColumnType.TITLE_LVL0:
-#             cell.font = Font(
-#                 name="Times New Roman",
-#                 size=10,
-#                 bold=True
-#             )
-#         elif EnumColumnType.TITLE_LVL1:
-#             cell.font = Font(
-#                 name="Times New Roman",
-#                 size=14,
-#                 bold=True
-#             )
-#         cell.number_format = '#,##0.00'
-#         cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-#     elif ColumnType == EnumColumnType.INPUT:
-#         cell.number_format = '#,##0.00'
-#         if cell.data_type == 'f':
-#             cell.font = formula_font
-#         else:
-#             cell.font = simple_font
-#     elif ColumnType == EnumColumnType.SIMPLE_FORMULA:
-#         cell.font = formula_font
-#         cell.number_format = '#,##0.00'
-#     elif ColumnType == EnumColumnType.PERCENT or ColumnType == EnumColumnType.POSITIVE_NEGATIVE:
-#         set_value_cell(cell, value)
-#         cell.font = formula_font
-#         green_font = Font(
-#             name="Times New Roman",
-#             size=14,
-#             color='00B050'
-#         )
-#         red_font = Font(
-#             name="Times New Roman",
-#             size=14,
-#             color='C00000'
-#         )
-#         rule_positive = CellIsRule(
-#             operator='greaterThan',
-#             formula=['0'],
-#             font=green_font
-#         )
-#         rule_negative = CellIsRule(
-#             operator='lessThan',
-#             formula=['0'],
-#             font=red_font
-#         )
-#         cell.parent.conditional_formatting.add(cell.coordinate,rule_positive)
-#         cell.parent.conditional_formatting.add(cell.coordinate,rule_negative)
-#         if ColumnType == EnumColumnType.PERCENT:
-#             cell.number_format = numbers.FORMAT_PERCENTAGE
-#============================================================================================
-def set_value_cell(cell, value, ColumnType:EnumColumnType=EnumColumnType.INPUT):
-    global G_STYLE_FONT_SIMPLE, \
-        G_STYLE_FONT_FORMULA, \
-        G_STYLE_FONT_TITLE_LVL0, \
-        G_STYLE_FONT_TITLE_LVL1, \
-        G_STYLE_FONT_GREEN, \
-        G_STYLE_FONT_RED, \
-        G_STYLE_RULE_POSITIVE, \
-        G_STYLE_RULE_NEGATIVE, \
-        G_STYLE_FULL_BORDER, \
-        G_STYLE_FORMAT_PERCENTAGE
-
-
-    cell.value = value
-
-    if ColumnType in (EnumColumnType.TITLE_LVL0, EnumColumnType.TITLE_LVL1):
-        if ColumnType == EnumColumnType.TITLE_LVL0:
-            chosen_style = {**G_STYLE_FONT_TITLE_LVL0}
-        else:
-            chosen_style = {**G_STYLE_FONT_TITLE_LVL1}
-
-    elif ColumnType == EnumColumnType.INPUT:
-        if cell.data_type == 'f':
-            chosen_style = {**G_STYLE_FONT_FORMULA}
-        else:
-            chosen_style = {**G_STYLE_FONT_SIMPLE}
-
-    elif ColumnType == EnumColumnType.SIMPLE_FORMULA:
-        chosen_style = {**G_STYLE_FONT_FORMULA}
-
-    elif ColumnType in (EnumColumnType.PERCENT, EnumColumnType.POSITIVE_NEGATIVE):
-        chosen_style = {**G_STYLE_FONT_FORMULA}
-
-        # cell.parent.conditional_formatting.add(cell.coordinate, RULE_POSITIVE)
-        # cell.parent.conditional_formatting.add(cell.coordinate, RULE_NEGATIVE)
-
-        if ColumnType == EnumColumnType.PERCENT:
-            chosen_style['number_format'] = G_STYLE_FORMAT_PERCENTAGE # тип данных строка
-    else:
-         chosen_style = {**G_STYLE_FONT_SIMPLE}
-
-    cell.font = chosen_style['font']
-    cell.alignment = chosen_style['alignment']
-    if chosen_style['border']:
-        cell.border = chosen_style['border']
-    cell.fill = chosen_style['fill']
-    cell.number_format = chosen_style['number_format']
-# #============================================================================================
-def extract_cell_styles(src_cell, with_border:bool=True):
-    return {
-        'font'          : copy.copy(src_cell.font),
-        'alignment'     : copy.copy(src_cell.alignment),
-        'border'        : copy.copy(src_cell.border) if with_border else None,
-        'fill'          : copy.copy(src_cell.fill),
-        'number_format' : src_cell.number_format
-    }
-def download_report2(type_download, selected_factories,selected_reports,columns):
-    global G_STYLE_FONT_SIMPLE, \
-        G_STYLE_FONT_FORMULA, \
-        G_STYLE_FONT_TITLE_LVL0, \
-        G_STYLE_FONT_TITLE_LVL1, \
-        G_STYLE_FONT_GREEN, \
-        G_STYLE_FONT_RED, \
-        G_STYLE_RULE_POSITIVE, \
-        G_STYLE_RULE_NEGATIVE, \
-        G_STYLE_FULL_BORDER, \
-        G_STYLE_FORMAT_PERCENTAGE
-
-    month = {
-        1 : 'январь',
-        2 : 'февраль',
-        3 : 'март',
-        4 : 'апрель',
-        5 : 'май',
-        6 : 'июнь',
-        7 : 'июль',
-        8 : 'август',
-        9 : 'сентябрь',
-        10 : 'октябрь',
-        11 : 'ноябрь',
-        12 : 'декабрь',
-    }
-
-    have_custom_col_calc = {
-        '2260099' : {
-            'Find' : False,
-            'ptr' : None,
-            'IndexColumnForPtr' : -1
-        },
-        '2260010' : {
-            'Find' : False,
-            'ptr' : None,
-            'IndexColumnForPtr' : -1
-        },
-    }
-    for index, column in enumerate(columns):
-        if 'ColumnType' not in column:
-            column['ColumnType'] = 'Selected'
-        if 'variantPlaning' in column:
-            variantPlaning = column.get('variantPlaning')
-            if variantPlaning == '2260099':
-                if have_custom_col_calc[variantPlaning]['Find'] == False:
-                    have_custom_col_calc[variantPlaning]['Find'] = True
-                    have_custom_col_calc[variantPlaning]['Ptr'] = column
-                    have_custom_col_calc[variantPlaning]['IndexColumnForPtr'] = index
-            if variantPlaning == '2260010':
-                have_custom_col_calc[variantPlaning]['Find'] = True
-                if have_custom_col_calc[variantPlaning]['Find']:
-                    columns.append({
-                            'ColumnType'        : 'SecondMinusFirst',
-                            'ColumnName'        : '+ / -',
-                            'IndexColumnForPtr' : index,
-                            'IsStartGroup'      : True,
-                            'GroupName'         : 'Отклонение',
-                            'FormulaLink'       : {
-                                'Formula'   : '=ЕСЛИОШИБКА({}-{};"-")',
-                                'total'     : 2,
-                                'col1'      : {
-                                    'Letter'        : '',
-                                    'index'         : index # 10
-                                },
-                                'col2'      : {
-                                    'Letter'        : '',
-                                    'index'         : have_custom_col_calc['2260099']['IndexColumnForPtr'] # 99
-                                }
-                            },
-                            'ptr'               : column
-                    })
-                    columns.append({
-                            'ColumnType'        : 'PercentOfComplete',
-                            'ColumnName'        : '% вып.',
-                            'IndexColumnForPtr' : index,
-                            'IsStartGroup'      : False,
-                            'GroupName'         : 'Отклонение',
-                            'FormulaLink'       : {
-                                'Formula'   : '=ЕСЛИОШИБКА({}/{};"-")',
-                                'total'     : 2,
-                                'col1'      : {
-                                    'Letter'        : '',
-                                    'index'         : index # 10
-                                },
-                                'col2'      : {
-                                    'Letter'        : '',
-                                    'index'         : have_custom_col_calc['2260099']['IndexColumnForPtr'] # 99
-                                }
-                            },
-                            'ptr': column
-                    })
-                    columns.append({
-                            'ColumnType'        : 'PercentOfOutput',
-                            'ColumnName'        : '% выхода',
-                            'IndexColumnForPtr' : have_custom_col_calc['2260099']['IndexColumnForPtr'],
-                            'IsStartGroup'      : False,
-                            'GroupName'         : 'Отклонение',
-                            'FormulaLink'       : {
-                                'Formula'   : '=ОКРУГЛ({}/{}*100;6)',  # деление текущей строки 99 на первую
-                                'total'     : 2,
-                                'col1'      : {
-                                    'Letter'        : '',
-                                    'index'         : have_custom_col_calc['2260099']['IndexColumnForPtr']  # 99
-                                },
-                                'col2'      : {
-                                    'Letter'        : '',
-                                    'index'         : have_custom_col_calc['2260099']['IndexColumnForPtr']  # 99
-                                }
-                            },
-                            'ptr': have_custom_col_calc['2260099']['Ptr']
-                    })
-
-    offset_ind_col = 2 #1
-    factories_all = [row.id for row in get_data_from_query("SELECT id FROM tab_factories_d816_4")]
-    if not selected_factories:
-        selected_factories = factories_all
-    if not selected_reports:
-        selected_reports = [1]
-
-    settings = get_data_from_query(
-        'SELECT id, "DO", pj FROM tab_factories_d816_4 WHERE id IN :factory_ids',
-        {"factory_ids": tuple(selected_factories)})
-    if not settings:
-        return get_msg_struct(EnumMsg.SETTINGS_FOR_REPORT_NOT_FOUND)
-
-    composite_keys_do_pj = [(row.DO, row.pj) for row in settings]
-
-    # bs_calc_mapping = get_data_from_query(
-    #     """
-    #                 SELECT "DO", pj, bs, calc FROM tab_bs_calc_map_d816_4 WHERE ("DO",pj) IN :composite_keys
-    #             """,
-    #     {"composite_keys": tuple(composite_keys_do_pj)})
-
-
-    temp_data = {}
-    for col in columns:
-        if 'typeData' in col:
-            type_id = int(col['typeData'])
-
-            if type_id == 1:
-                if type_id not in temp_data:
-                    temp_data[type_id] = []
-
-                temp_data[type_id].append({ 'variant_planing': col.get('variantPlaning') })
-
-            else:
-                temp_data[type_id] = {'simple': True}
-
-    columns_collect = [{key: val} for key, val in temp_data.items()]
-
-    columns_text = []
-    # for collect in columns_collect:
-    for item in columns_collect:
-            for type_id, collect in item.items():
-                if type_id == 1:
-                    variants = [item['variant_planing'] for item in collect]
-
-                    query_res = get_data_from_query(
-                        'SELECT id, name FROM tab_view_var_plan_d816_4 WHERE id IN :variant_ids',
-                        {'variant_ids': tuple(variants)})
-                    for row in query_res:
-                        columns_text.append({'typeData' : type_id, 'id' : row.id, 'name' : row.name})
-
-                elif type_id == 15:
-                    query_res = get_data_from_query(
-                        'SELECT id, name FROM tab_view_io_bcblm0003_d816_4 WHERE id = :type_id',
-                        {'type_id': type_id})
-                    for row in query_res:
-                        columns_text.append({'typeData' : type_id, 'id':row.id, 'name' : row.name})
-
-    def get_txt_col(column):
-        if 'ColumnType' in column:
-            if column.get('ColumnType') == 'Selected':
-                if 'typeData' in column:
-                    typeData = int(column.get('typeData'))
-                    if typeData == 1 and 'variantPlaning' in column:
-                        matched_item = next( (item for item in columns_text if int(item['id']) == int(column.get('variantPlaning'))), '' )
-                        return matched_item.get('name','')
-                    elif typeData == 15:
-                        matched_item = next((item for item in columns_text if int(item['id']) == typeData), '')
-                        return matched_item.get('name', '')
-            else:
-                if 'ColumnName' in column:
-                    return column.get('ColumnName')
-        return ''
-    def get_internal_key(column, type_name):
-        if 'ColumnType' in column:
-            ColumnType = column.get('ColumnType')
-            if ColumnType == 'Selected':
-                return f"{type_name}:{column.get('typeData')}:{column.get('variantPlaning')}"
-        return ''
-    def get_index_column_layout(columns_layout, simple_key, idx):
-        col_index = 0
-        for i, col in enumerate(columns_layout):
-            if col['type'] == simple_key:
-                if idx == col_index:
-                    return i
-                else:
-                    col_index+=1
-        return 0
-    def get_calced_formula_link_index_column_layout(columns_layout, simple_key, formula_link):
-        FormulaLink = formula_link
-        if 'total' in FormulaLink and FormulaLink.get('total') > 0:
-            col_index = [0] * FormulaLink.get('total')
-            for j in range(1,FormulaLink.get('total')+1):
-                if f'col{j}' in FormulaLink:
-                    FormulaLink[f'col{j}']['index'] = get_index_column_layout(
-                        columns_layout,
-                        simple_key,
-                        FormulaLink.get(f'col{j}').get('index'))
-        return FormulaLink
-    def get_count_merge_group(columns, column):
-        count = 0
-        if column.get('IsStartGroup', False):
-            NeedGroupName = column.get('GroupName')
-            if NeedGroupName:
-                for col in columns:
-                    if 'GroupName' in col and col.get('GroupName') == NeedGroupName:
-                        count+=1
-        return count
-
-    template_name = g_report_template_name
-    path_template = str(Path(main_folder) / Path(file_folder) / Path(template_name))
-
-    # Получаем рабочую книгу из шаблона
-    wb = openpyxl.load_workbook(path_template)
-
-    # Создаём буфер для наполнения
-    buffer = io.BytesIO()
-
-    #===================================================================================================================
-    ws_tech = wb['tech']
-    if ws_tech:
-        G_STYLE_FONT_SIMPLE = extract_cell_styles(ws_tech['B2'], False)
-        G_STYLE_FONT_FORMULA = extract_cell_styles(ws_tech['B3'], False)
-        G_STYLE_FONT_TITLE_LVL0 = extract_cell_styles(ws_tech['B4'], False)
-        G_STYLE_FONT_TITLE_LVL1 = extract_cell_styles(ws_tech['B5'], False)
-        G_STYLE_FONT_GREEN = extract_cell_styles(ws_tech['B6'], False)
-        G_STYLE_FONT_RED = extract_cell_styles(ws_tech['B7'], False)
-        G_STYLE_FULL_BORDER = copy.copy(ws_tech['B8'].border)
-        G_STYLE_FORMAT_PERCENTAGE = ws_tech['B9'].number_format
-
-        for cf in ws_tech.conditional_formatting:
-            for rule in cf.rules:
-                if rule.type == "cellIs":
-                    if rule.operator == "greaterThan":
-                        G_STYLE_RULE_POSITIVE = rule
-                    elif rule.operator == "lessThan":
-                        G_STYLE_RULE_NEGATIVE = rule
-
-            # Если оба правила успешно найдены, досрочно прерываем поиск ради скорости
-            if G_STYLE_RULE_POSITIVE and G_STYLE_RULE_NEGATIVE:
-                break
-    #===================================================================================================================
-    count_columns = len(columns)
-
-    columns_layout = []
-    for index_column, column in enumerate(columns):
-        ColumnType = column.get('ColumnType')
-        if ColumnType == 'Selected':
-            simple_key = f"year{column.get('dateRange')[0][-4:]}"
-            columns_layout.append({
-                'Letter': '',
-                'ColumnType': ColumnType,
-                'type': simple_key,
-                'data_type_col': index_column,
-                'IsNeedMerge': True if index_column == 0 else False,
-                'MergeCount': count_columns,
-                'col_name': get_txt_col(column),
-                'internal_key': get_internal_key(column, simple_key)
-            })
-        elif ColumnType in ('SecondMinusFirst', 'PercentOfComplete', 'PercentOfOutput'):
-            if 'ptr' in column:
-                col = column.get('ptr')
-                simple_key = f"year{col.get('dateRange')[0][-4:]}"
-                FormulaLink = copy.deepcopy(column.get('FormulaLink'))
-                columns_layout.append({
-                    'Letter': '',
-                    'ColumnType': ColumnType,
-                    'type': simple_key,
-                    'data_type_col': index_column,
-                    'IsNeedMerge': column.get('IsStartGroup', False),
-                    'MergeCount': get_count_merge_group(columns, column),
-                    'col_name': get_txt_col(column),
-                    'GroupName': column.get('GroupName', ''),
-                    'internal_key': get_internal_key(column, simple_key),
-                    'FormulaLink': get_calced_formula_link_index_column_layout(
-                        columns_layout,
-                        simple_key,
-                        FormulaLink),
-                    'IndexColumnForPtr': get_index_column_layout(columns_layout, simple_key,
-                                                                 column.get('IndexColumnForPtr'))
-                })
-
-    for q in range(1, 5):
-        for index_column, column in enumerate(columns):
-            ColumnType = column.get('ColumnType')
-            if ColumnType == 'Selected':
-                simple_key = f"Q{q}"
-                columns_layout.append({
-                    'Letter': '',
-                    'ColumnType': ColumnType,
-                    'type': simple_key,
-                    'data_type_col': index_column,
-                    'IsNeedMerge': True if index_column == 0 else False,
-                    'MergeCount': count_columns,
-                    'col_name': get_txt_col(column),
-                    'internal_key': get_internal_key(column, simple_key)
-                })
-            elif ColumnType in ('SecondMinusFirst', 'PercentOfComplete', 'PercentOfOutput'):
-                if 'ptr' in column:
-                    col = column.get('ptr')
-                    simple_key = f"Q{q}"
-                    FormulaLink = copy.deepcopy(column.get('FormulaLink'))
-                    columns_layout.append({
-                        'Letter': '',
-                        'ColumnType': ColumnType,
-                        'type': simple_key,
-                        'data_type_col': index_column,
-                        'IsNeedMerge': column.get('IsStartGroup', False),
-                        'MergeCount': get_count_merge_group(columns, column),
-                        'col_name': get_txt_col(column),
-                        'GroupName': column.get('GroupName', ''),
-                        'internal_key': get_internal_key(column, simple_key),
-                        'FormulaLink': get_calced_formula_link_index_column_layout(
-                            columns_layout,
-                            simple_key,
-                            FormulaLink),
-                        'IndexColumnForPtr': get_index_column_layout(columns_layout, simple_key,
-                                                                     column.get('IndexColumnForPtr'))
-                    })
-        for m in range(1, 4):
-            for index_column, column in enumerate(columns):
-                ColumnType = column.get('ColumnType')
-                if ColumnType == 'Selected':
-                    simple_key = f"M{q}_{m}"
-                    columns_layout.append({
-                        'Letter': '',
-                        'ColumnType': ColumnType,
-                        'type': simple_key,
-                        'data_type_col': index_column,
-                        'IsNeedMerge': True if index_column == 0 else False,
-                        'MergeCount': count_columns,
-                        'col_name': get_txt_col(column),
-                        'calmonth': (q - 1) * 3 + m,
-                        'internal_key': get_internal_key(column, simple_key)
-                    })
-                elif ColumnType in ('SecondMinusFirst', 'PercentOfComplete', 'PercentOfOutput'):
-                    if 'ptr' in column:
-                        col = column.get('ptr')
-                        simple_key = f"M{q}_{m}"
-                        FormulaLink = copy.deepcopy(column.get('FormulaLink'))
-                        columns_layout.append({
-                            'Letter': '',
-                            'ColumnType': ColumnType,
-                            'type': simple_key,
-                            'data_type_col': index_column,
-                            'IsNeedMerge': column.get('IsStartGroup', False),
-                            'MergeCount': get_count_merge_group(columns, column),
-                            'col_name': get_txt_col(column),
-                            'GroupName': column.get('GroupName', ''),
-                            'internal_key': get_internal_key(column, simple_key),
-                            'FormulaLink': get_calced_formula_link_index_column_layout(
-                                columns_layout,
-                                simple_key,
-                                FormulaLink),
-                            'IndexColumnForPtr': get_index_column_layout(columns_layout, simple_key,
-                                                                         column.get('IndexColumnForPtr'))
-                        })
-    #===================================================================================================================
-    if type_download == 'simple':
-        sheets_to_keep = set()
-
-        for factory_id in selected_factories:
-            range_name = f"_BS{factory_id}"
-            defined_name = wb.defined_names.get(range_name)
-
-            if not defined_name:
-                continue
-
-            try:
-                for sheet_title, cell_range in defined_name.destinations:
-                    if sheet_title in wb.sheetnames:
-                        sheets_to_keep.add(sheet_title)
-                    break
-            except Exception as e:
-                pass
-
-        if not sheets_to_keep:
-            return False
-
-        for sheet_name in wb.sheetnames:
-            if sheet_name not in sheets_to_keep and sheet_name != 'tech':
-                wb.remove(wb[sheet_name])
-    #===================================================================================================================
-    for factory_id in factories_all:
-        loc_settings = next((row for row in settings if row.id == factory_id), None)
-        try:
-            def_range_bs = wb.defined_names[f'_BS{factory_id}']
-            def_range_ik = wb.defined_names[f'_INTERNAL_KEY{factory_id}']
-        except Exception as e:
-            continue
-        sheet_name_bs = ''
-        bs_col_index = -1
-        FirstRowData = -1
-        LastRowData = -1
-        first_row = -1
-
-        for sheet_name_rng_bs, cell_coordinates_rng_bs in def_range_bs.destinations:
-            bs_col_index, _, _, _ = range_boundaries(cell_coordinates_rng_bs)
-            sheet_name_bs = sheet_name_rng_bs
-            if sheet_name_bs in wb.sheetnames:
-                sheet = wb[sheet_name_bs]
-            else:
-                continue
-
-            if factory_id not in selected_factories:
-                sheet.sheet_state = 'veryHidden'
-                continue
-
-            for sheet_name_rng_ik, cell_coordinates_rng_ik in def_range_ik.destinations:
-                _, FirstRowData, _, _ = range_boundaries(cell_coordinates_rng_ik)
-
-            if FirstRowData == -1:
-                continue
-            else:
-                FirstRowData += 1
-
-            sheet.sheet_state = 'visible'
-            if sheet and bs_col_index != -1:
-                loc_index_offset = bs_col_index + 1 + offset_ind_col
-                loc_bs_calc_mapping = []
-                dict_bs = []
-                last_row = sheet.max_row
-
-
-                for i in range(1, last_row + 1):
-                    cell = sheet.cell(row=i, column=bs_col_index)
-                    if cell.value is not None:
-                        LastRowData = i
-                        if i >= FirstRowData:
-                            if str(cell.value).isdigit():
-                                dict_bs.append(cell.value)
-
-                            cell_calc = sheet.cell(row=i, column=bs_col_index + 1)
-                            if cell_calc and cell_calc.value is not None:
-                                loc_bs_calc_mapping.append({
-                                    'bs': cell.value,
-                                    'calc': cell_calc.value
-                                })
-                        elif first_row == -1 and cell.value == 'ID':
-                            first_row = i
-
-                if not dict_bs or first_row == -1:
-                    continue
-
-                if G_STYLE_FULL_BORDER:
-                    _min_col = bs_col_index + 1 + offset_ind_col
-                    _max_col = bs_col_index + 1 + offset_ind_col + len(columns_layout)-1
-                    for row in sheet.iter_rows(
-                            min_row=first_row,
-                            max_row=LastRowData,
-                            min_col=_min_col,
-                            max_col=_max_col):
-                        for cell in row:
-                            cell.border = G_STYLE_FULL_BORDER
-
-                sheet.row_dimensions[first_row + 0].height = 20 # column title
-                sheet.row_dimensions[first_row + 1].height = 40 # column name
-                sheet.row_dimensions[first_row + 2].height = 20 # column helper description
-                sheet.row_dimensions[first_row + 3].height = 20 # column internal_key
-
-                multi_range_rule = MultiCellRange()
-                for idx, col in enumerate(columns_layout):
-                    col_num = idx + loc_index_offset
-                    col_letter = get_column_letter(col_num)
-                    col['Letter'] = col_letter
-                    ColumnType = col.get('ColumnType')
-
-                    FormulaLink = col.get('FormulaLink','')
-                    if FormulaLink:
-                        total = FormulaLink.get('total')
-                        for i in range(1, total + 1):
-                            formula_col = FormulaLink.get(f'col{i}','')
-                            if formula_col:
-                                formula_col['Letter'] = get_column_letter(formula_col['index'] + loc_index_offset)
-
-                    sheet.column_dimensions[col_letter].width = 22 #16.29
-                    if ColumnType == 'Selected':
-                        # Заголовок уровня 0
-                        cell = sheet.cell(row=first_row + 1, column=col_num)
-                        sheet.merge_cells(start_row=first_row+1, start_column=col_num, end_row=first_row+2,
-                                          end_column=col_num)
-                    else:
-                        # Заголовок уровня 1
-                        cell = sheet.cell(row=first_row + 2, column=col_num)
-                        if G_STYLE_RULE_POSITIVE and ColumnType in ('SecondMinusFirst', 'PercentOfComplete'):
-                            current_range = f'${col_letter}${FirstRowData}:${col_letter}${LastRowData}'
-                            multi_range_rule.add(current_range)
-
-                    set_value_cell(cell, col.get('col_name'), EnumColumnType.TITLE_LVL0)
-                    # Заголовок уровня 2 (внутренние ключи)
-                    set_value_cell(sheet.cell(row=first_row+3, column=col_num), col.get('internal_key'))
-
-                    if 'IsNeedMerge' in col and col['IsNeedMerge']:
-                        if col.get('MergeCount', 0) > 1:
-                            if ColumnType == 'Selected':
-                                # Заголовок уровня 0
-                                sheet.merge_cells(start_row=first_row, start_column=col_num, end_row=first_row,
-                                                  end_column=col_num + col['MergeCount'] - 1)
-                            else:
-                                # Заголовок уровня 1 (на строку ниже)
-                                sheet.merge_cells(start_row=first_row+1, start_column=col_num, end_row=first_row+1,
-                                                  end_column=col_num + col['MergeCount'] - 1)
-
-                        if ColumnType == 'Selected':
-                            cell = sheet.cell(row=first_row, column=col_num)
-                            if 'year' in col['type']:
-                                set_value_cell(cell,col.get('type')[-4:], EnumColumnType.TITLE_LVL1)
-                            elif 'Q' in col['type']:
-                                q_number = col['type'][1]
-                                set_value_cell(cell,f'{q_number} квартал', EnumColumnType.TITLE_LVL1)
-                            elif 'M' in col['type']:
-                                set_value_cell(cell,month[col.get('calmonth')], EnumColumnType.TITLE_LVL1)
-                        else:
-                            GroupName = col.get('GroupName','')
-                            if GroupName:
-                                cell = sheet.cell(row=first_row+1, column=col_num)
-                                set_value_cell(cell,GroupName, EnumColumnType.TITLE_LVL1)
-
-                if G_STYLE_RULE_POSITIVE:
-                    sheet.conditional_formatting.add(str(multi_range_rule), G_STYLE_RULE_POSITIVE)
-                if G_STYLE_RULE_NEGATIVE:
-                    sheet.conditional_formatting.add(str(multi_range_rule), G_STYLE_RULE_NEGATIVE)
-
-                query_res_for_column = []
-                for index_column, column in enumerate(columns, start=1):
-                    if column.get('ColumnType') == 'Selected':
-                        year = column.get('dateRange')[0][-4:]
-                        ver_plan = column.get('versionPlaning', 0)
-                        var_plan = column.get('variantPlaning', 0)
-                        do = loc_settings.DO
-                        pj = loc_settings.pj
-                        data_type = column.get('typeData')
-                        query_res_for_column.append(get_row_list_msb_zuv_d816_4(year, ver_plan, var_plan, dict_bs, do, pj, data_type))
-
-                fill_obj_column(offset_ind_col,
-                                sheet,
-                                dict_bs,
-                                bs_col_index,
-                                FirstRowData,
-                                LastRowData,
-                                loc_settings,
-                                loc_bs_calc_mapping,
-                                count_columns,
-                                columns_layout,
-                                query_res_for_column)
-    #===================================================================================================================
-
-    # Сохраняем подготовленные данные из шаблона
-    wb.save(buffer)
-    # Откатываем курсор в самое начало
-    buffer.seek(0)
-    # имя файла
-    filename = template_name
-
-    return send_file(
-        buffer,
-        mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        as_attachment=True,
-        download_name=filename
-    )
-#============================================================================================
-def fill_obj_column(
-        offset_ind_col,
-        sheet,
-        dict_bs,
-        bs_col_index,
-        FirstRowData,
-        LastRowData,
-        settings,
-        bs_calc_mapping,
-        count_sel_column,
-        columns_layout,
-        query_res_for_column):
-
-    def get_col_letter_by_type(col_type, data_type_col):
-        for idx, col in enumerate(columns_layout):
-            if col["type"] == col_type and col["data_type_col"] == data_type_col:
-                return col.get('Letter')
-        return None
-
-    def set_calc_cell_val(cell, col_letter, query_res, bs_calc_mapping):
-        for map in bs_calc_mapping:
-            if map.get('bs') == cell_bs.value and map.get('calc') != None and map.get('calc') != '':
-                parts = re.split(r'(\$?\d+)', map.get('calc'))
-                src_formula = '='
-                # src_formula = ''
-                for p in parts:
-                    FindState = 0
-                    if p.startswith('$'):
-                        p = p.replace('$', '')
-                    elif p.isdigit():
-                        FindState = 1
-                        for i in range(1, LastRowData + 1):
-                            loc_cell_bs = sheet.cell(row=i, column=bs_col_index)
-                            if str(loc_cell_bs.value) == p:
-                                p = f'{col_letter}{i}'
-                                FindState = 2
-                                break
-                    if FindState == 1:
-                        p = 0
-                    src_formula = f'{src_formula}{p}'
-
-                # openpyxl не умеет в русские формулы поэтому конвертируем из русской формулы в английскую
-                # чтобы на выходе в Exel или Р7-офис формула автоматически пересчитывались (работали)
-                set_value_cell(cell, ft.convert_russian_formula(src_formula))
-                return
-        for row in query_res:
-            if int(row.bs) == int(cell_bs.value) and col["calmonth"] == row.calmonth:
-                set_value_cell(cell, row.sum)
-                return
-        return
-
-    def get_filled_formula_by_col(col, l_col:list):
-        if 'FormulaLink' in col and 'total' in col.get('FormulaLink'):
-            FormulaLink = col.get('FormulaLink')
-            total = FormulaLink.get('total')
-            if total == len(l_col):
-                # src_formula = f"=ОКРУГЛ({letter_col}{i}/{letter_col}{FirstRowData}*100;6)"
-                src_formula = FormulaLink.get('Formula')
-                cell_address = []
-                for i in range(1, total+1):
-                    Letter = FormulaLink.get(f'col{i}').get('Letter')
-                    row = l_col[i-1]
-                    cell_address.append(f'{Letter}{row}')
-                src_formula = src_formula.format(*cell_address)
-                return src_formula
-        return ''
-
-    for i in range(FirstRowData, LastRowData + 1):
-        cell_bs = sheet.cell(row=i, column=bs_col_index)
-        cell_calc = sheet.cell(row=i, column=bs_col_index+1)
-        if cell_bs and cell_bs.value is not None:
-            if str(cell_bs.value).isdigit():
-                for idx, col in enumerate(columns_layout):
-                    col_letter = col.get('Letter')
-                    data_type_col = col["data_type_col"]
-                    ColumnType = col["ColumnType"]
-
-                    if "year" in col["type"]:
-                        if ColumnType == 'Selected':
-                            q1 = get_col_letter_by_type("Q1", data_type_col)
-                            q2 = get_col_letter_by_type("Q2", data_type_col)
-                            q3 = get_col_letter_by_type("Q3", data_type_col)
-                            q4 = get_col_letter_by_type("Q4", data_type_col)
-                            set_value_cell(sheet[f"{col_letter}{i}"], f"={q1}{i}+{q2}{i}+{q3}{i}+{q4}{i}")
-                        elif ColumnType == 'PercentOfOutput':
-                            src_formula = get_filled_formula_by_col(col,[i,FirstRowData])
-                            set_value_cell(sheet[f"{col_letter}{i}"],
-                                           ft.convert_russian_formula(src_formula))
-                        elif ColumnType in ('SecondMinusFirst', 'PercentOfComplete'):
-                            src_formula = get_filled_formula_by_col(col, [i, i])
-                            if ColumnType == 'SecondMinusFirst':
-                                set_value_cell(sheet[f"{col_letter}{i}"],
-                                               ft.convert_russian_formula(src_formula),
-                                               EnumColumnType.POSITIVE_NEGATIVE)
-                            elif ColumnType == 'PercentOfComplete':
-                                set_value_cell(sheet[f"{col_letter}{i}"],
-                                               ft.convert_russian_formula(src_formula),
-                                               EnumColumnType.PERCENT)
-                    elif "Q" in col["type"]:
-                        q_num = col["type"][1]
-
-                        if ColumnType == 'Selected':
-                            m1 = get_col_letter_by_type(f"M{q_num}_1", data_type_col)
-                            m2 = get_col_letter_by_type(f"M{q_num}_2", data_type_col)
-                            m3 = get_col_letter_by_type(f"M{q_num}_3", data_type_col)
-                            set_value_cell(sheet[f"{col_letter}{i}"], f"={m1}{i}+{m2}{i}+{m3}{i}")
-                        elif ColumnType == 'PercentOfOutput':
-                            src_formula = get_filled_formula_by_col(col, [i, FirstRowData])
-                            set_value_cell(sheet[f"{col_letter}{i}"],
-                                           ft.convert_russian_formula(src_formula))
-                        elif ColumnType in ('SecondMinusFirst', 'PercentOfComplete'):
-                            src_formula = get_filled_formula_by_col(col, [i, i])
-                            if ColumnType == 'SecondMinusFirst':
-                                set_value_cell(sheet[f"{col_letter}{i}"],
-                                               ft.convert_russian_formula(src_formula),
-                                               EnumColumnType.POSITIVE_NEGATIVE)
-                            elif ColumnType == 'PercentOfComplete':
-                                set_value_cell(sheet[f"{col_letter}{i}"],
-                                               ft.convert_russian_formula(src_formula),
-                                               EnumColumnType.PERCENT)
-                    elif "M" in col["type"]:
-                        if ColumnType == 'Selected':
-                            cell_val = sheet[f"{col_letter}{i}"]
-                            set_calc_cell_val(cell_val, col_letter,
-                                              query_res_for_column[data_type_col],
-                                              bs_calc_mapping)
-                        elif ColumnType == 'PercentOfOutput':
-                            src_formula = get_filled_formula_by_col(col, [i, FirstRowData])
-                            set_value_cell(sheet[f"{col_letter}{i}"],
-                                           ft.convert_russian_formula(src_formula))
-                        elif ColumnType in ('SecondMinusFirst', 'PercentOfComplete'):
-                            src_formula = get_filled_formula_by_col(col, [i, i])
-                            if ColumnType == 'SecondMinusFirst':
-                                set_value_cell(sheet[f"{col_letter}{i}"],
-                                               ft.convert_russian_formula(src_formula),
-                                               EnumColumnType.POSITIVE_NEGATIVE)
-                            elif ColumnType == 'PercentOfComplete':
-                                set_value_cell(sheet[f"{col_letter}{i}"],
-                                               ft.convert_russian_formula(src_formula),
-                                               EnumColumnType.PERCENT)
-
-            else: # расчёт для специальных строк
-                if "T" in str(cell_bs.value):
-                    if cell_calc and cell_calc.value is not None:
-                        for idx, col in enumerate(columns_layout):
-                            col_letter = col.get('Letter')
-                            data_type_col = col["data_type_col"]
-                            ColumnType = col["ColumnType"]
-                            cell_val = sheet[f"{col_letter}{i}"]
-                            if ColumnType == 'Selected':
-                                set_calc_cell_val(cell_val, col_letter,
-                                                  query_res_for_column[data_type_col],
-                                                  bs_calc_mapping)
-                            elif ColumnType == 'PercentOfOutput':
-                                src_formula = get_filled_formula_by_col(col, [i, FirstRowData])
-                                set_value_cell(sheet[f"{col_letter}{i}"],
-                                               ft.convert_russian_formula(src_formula))
-                            elif ColumnType in ('SecondMinusFirst', 'PercentOfComplete'):
-                                src_formula = get_filled_formula_by_col(col, [i, i])
-                                if ColumnType == 'SecondMinusFirst':
-                                    set_value_cell(sheet[f"{col_letter}{i}"],
-                                                   ft.convert_russian_formula(src_formula),
-                                                   EnumColumnType.POSITIVE_NEGATIVE)
-                                elif ColumnType == 'PercentOfComplete':
-                                    set_value_cell(sheet[f"{col_letter}{i}"],
-                                                   ft.convert_russian_formula(src_formula),
-                                                   EnumColumnType.PERCENT)
-    return False
-#============================================================================================
-def get_report_template(id):
-    template_name = g_report_template_name
-    path_template = str(Path(main_folder) / Path(file_folder) / Path(template_name))
-
-    # Получаем рабочую книгу из шаблона
-    wb = openpyxl.load_workbook(path_template)
-
-    factories_all = [row.id for row in get_data_from_query("SELECT id FROM tab_factories_d816_4")]
-    for factory_id in factories_all:
-        try:
-            def_range_bs = wb.defined_names[f'_BS{factory_id}']
-        except Exception as e:
-            continue
-        for sheet_name_rng_bs, cell_coordinates_rng_bs in def_range_bs.destinations:
-            sheet = wb[sheet_name_rng_bs]
-            if id != str(factory_id):
-                sheet.sheet_state = 'veryHidden'
-                continue
-
-            sheet.sheet_state = 'visible'
-
-    # Создаём буфер для наполнения
-    buffer = io.BytesIO()
-
-    wb.save(buffer)
-    # Откатываем курсор в самое начало
-    buffer.seek(0)
-    # имя файла
-    filename = template_name
-
-    return send_file(
-        buffer,
-        mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        as_attachment=True,
-        download_name=filename
-    )
-#============================================================================================
-def upload_report_template(factory_id: str, file_storage: FileStorage):
-    # Проверка, замена левых символов в имени файла
-    safe_filename = secure_filename(file_storage.filename)
-
-    try:
-        file_bytes = file_storage.stream.read()
-        file_stream = io.BytesIO(file_bytes)
-        wb = load_workbook(filename=file_stream, read_only=False)
-
-    except Exception as e:
-        return get_msg_struct(EnumMsg.ERROR_OPEN_TEMPLATE, str(e))
-
-    try:
-        factories_all = [row.id for row in get_data_from_query("SELECT id FROM tab_factories_d816_4")]
-        if factories_all:
-            for factory_id in factories_all:
-                try:
-                    def_range_bs = wb.defined_names[f'_BS{factory_id}']
-                    def_range_ik = wb.defined_names[f'_INTERNAL_KEY{factory_id}']
-                except Exception as e:
-                    return get_msg_struct(EnumMsg.ERROR_VALID_NEW_TEMPLATE)
-
-            path_template = str(Path(main_folder) / Path(file_folder) )
-
-            base_template_dir = os.environ.get("TEMPLATE_DIR", path_template)
-
-            target_filename = f"{g_report_template_name}".lower()
-            target_path = os.path.join(base_template_dir, target_filename)
-
-            dir_to_create = os.path.dirname(target_path)
-            if not os.path.exists(dir_to_create):
-                try:
-                    os.makedirs(dir_to_create, mode=0o755, exist_ok=True)
-                except PermissionError:
-                    wb.close()
-                    return get_msg_struct(EnumMsg.ERROR_PERMISSION_CREATE_DIR_LINUX, dir_to_create)
-
-            # Перезапись существующего файла шаблона
-            if os.path.exists(target_path) and not os.access(target_path, os.W_OK):
-                wb.close()
-                return get_msg_struct(EnumMsg.ERROR_PERMISSION_OVERWRITE_FILE)
-
-            # Сохранение файла
-            wb.save(target_path)
-            wb.close()
-        else:
-            return get_msg_struct(EnumMsg.SETTINGS_FOR_REPORT_NOT_FOUND)
-
-        return get_msg_struct(EnumMsg.SUCCESS)
-
-    except Exception as e:
-        if 'wb' in locals():
-            wb.close()
-        return get_msg_struct(EnumMsg.ERROR_SAVE_OR_PROC_TEMPLATE, str(e))
+        abort(msg_list[EnumMsg.SYSTEM_ERROR].get('code'),
+              description=get_msg_struct(EnumMsg.SYSTEM_ERROR)[0]['message'])
