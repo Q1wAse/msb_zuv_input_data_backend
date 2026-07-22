@@ -38,15 +38,19 @@ class ClsStructDataProdMetrics(Resource):
 
             total: dict
 
-            versions = uf.get_pagin_data('var_plan', '', 1, 100)
+            variants = uf.get_pagin_data('var_plan', '', 1, 100)
+            version = uf.get_pagin_data('vers_plan', '', 1, 100)
 
             grouped = {}
-            for item in versions:
+            for item in variants:
                 v_id = item["tab_vers_plan_ids"]
 
                 if v_id not in grouped:
                     grouped[v_id] = {
-                        "version": v_id,
+                        "version": {
+                            'id' : v_id,
+                            'name' : next((item for item in version if item.get('id') == v_id), {}).get('name', ''),
+                        },
                         "variants": []
                     }
 
@@ -60,11 +64,11 @@ class ClsStructDataProdMetrics(Resource):
                 'factories': uf.get_pagin_data('factories', '', 1, 100),
                 'data_type': uf.get_pagin_data('data_type', '', 1, 100),
                 'versions': list(grouped.values()),
-                'years' : list(range(2020,2030)), # uf.get_pagin_data('view_year', '', 1, 100),
-                'product' : [{'id' : 1, 'name' : 'Бензины'}], # uf.get_pagin_data('view_product', '', 1, 1000),
+                'years' : uf.get_pagin_data('view_year', '', 1, 100),
+                'product' : uf.get_pagin_data('view_product', '', 1, 1000),
                 'sobstv' : uf.get_pagin_data('sobstv', '', 1, 100),
                 'mest' : uf.get_pagin_data('mest', '', 1, 100),
-                'post_zuv' : [{'id' : 1, 'name' : 'ООО "Газпром добыча Иркутск"'}] # uf.get_pagin_data('post_zuv', '', 1, 1000),
+                'post_zuv' : uf.get_pagin_data('post_zuv', '', 1, 1000),
             }
 
             return total, 200
@@ -90,7 +94,7 @@ main_container_get_prod_metrics_model = ns_ui_prod_metrics.model('ContainerGetPr
         fields.String,
         description='Вариант сравнения',
         required=True,
-        example=["1"]
+        example=["1","2"]
         # example=["1", "2", "3"]
     ),
     'selectedFactories': fields.List(
