@@ -5,8 +5,30 @@ import msb_zuv_input_data_backend.functions.utility_functions as uf
 def get_struct_prod_metrics():
     return [0,1]
 #=======================================================================================================================
-def get_calc_frame1(selected_variant_compare,selected_factories, variant_columns):
+# Рассчитать для графика объёмы для года
+def get_calc_volume_old(data_slice, product, type_raspr, ei, selected_variant_compare, selected_factories, variant_columns):
     db = uf.get_db_connection()
+    period_str = ""
+    data_slice_str = ""
+    if data_slice == 'year':
+        # period_str = "main.month = 0 AND main.quarter = 0 AND"
+        period_str = "main.month <> 0 AND"
+        data_slice_str = f"main.{data_slice},"
+    elif data_slice == 'month':
+        period_str = "main.month <> 0 AND"
+        data_slice_str = f"main.{data_slice},"
+    elif data_slice == 'tab_product_d816_4_ids':
+        period_str = "main.month <> 0 AND"
+        data_slice_str = f"main.{data_slice},"
+    params = {}
+
+    product_list = [int(item) for item in product]
+    product_str = ""
+    if product_list:
+        product_str = "main.tab_product_d816_4_ids = ANY(:product) AND"
+        params["product"] = product_list
+
+    type_raspr_list = [int(item) for item in type_raspr]
 
     factory_list = [int(item) for item in selected_factories]
     var_plans_list = [
@@ -19,38 +41,244 @@ def get_calc_frame1(selected_variant_compare,selected_factories, variant_columns
         for idx, item in enumerate(variant_columns, start=1)
         if str(idx) in selected_variant_compare
     ]
-    col_sql = text("""
+
+    params['type_raspr'] = type_raspr_list
+    params['ei'] = ei
+    params['factory'] = factory_list
+    params['var_plans'] = var_plans_list
+    params['years'] = years_list
+
+    col_sql = text(f"""
                         SELECT
-                            sum(main.value),
-                            params.idx as variantColumns
+                            params.idx as variantColumns,
+                            {data_slice_str}
+                            sum(main.value)
+                            
                         FROM tab_pererabotka_d816_4 main
                         JOIN LATERAL unnest(CAST(:var_plans AS INTEGER[]), CAST(:years AS INTEGER[])) WITH ORDINALITY AS params(var_plan, year, idx)
                           ON main.tab_var_plan_d816_4_ids = params.var_plan 
                           AND main.year = params.year
                         WHERE
-                            main.tab_product_d816_4_ids = 64 AND
-                            main.tab_type_raspr_d816_4_ids = 5 AND
-                            main.month = 0 AND 
-                            main.quarter = 0 AND
+                            {product_str}
+                            main.tab_type_raspr_d816_4_ids = ANY(:type_raspr) AND
+                            {period_str}
                             main.tab_factory_d816_4_ids = ANY(:factory) AND
-                            main.tab_ei_d816_4_ids = 2
-                        GROUP BY params.idx
+                            main.tab_ei_d816_4_ids = :ei
+                        GROUP BY {data_slice_str}params.idx
                         ORDER BY params.idx;
                     """)
     if var_plans_list and years_list:
-        result = db.execute(col_sql,
-                            {
-                                'factory' : factory_list,
-                                'var_plans': var_plans_list,
-                                'years': years_list
-                            }
-                            ).fetchall()
-        return result
+        result = db.execute(col_sql, params).fetchall()
+        res = []
+
+        for row in result:
+            mapping = row._mapping
+
+            new_row = {
+                'variantColumns' : row.variantcolumns
+            }
+            if data_slice in mapping:
+                new_row[data_slice] = mapping[data_slice]
+            new_row['value'] = float(row.sum)
+
+            res.append(new_row)
+        return res
     else:
         return []
 #=======================================================================================================================
-def get_calculated_values(selected_variant_compare, selected_factories, variant_columns):
+#=======================================================================================================================
+def get_calc_volume(data_slice, product, type_raspr, ei, selected_variant_compare, selected_factories, variant_columns, reverse_diff=False):
+    db = uf.get_db_connection()
+    period_str = ""
+    data_slice_str = ""
+    if data_slice == 'year':
+        period_str = "main.month <> 0 AND"
+        data_slice_str = f"main.{data_slice},"
+    elif data_slice == 'month':
+        period_str = "main.month <> 0 AND"
+        data_slice_str = f"main.{data_slice},"
+    elif data_slice == 'tab_product_d816_4_ids':
+        period_str = "main.month <> 0 AND"
+        data_slice_str = f"main.{data_slice},"
+    params = {}
+
+    product_list = [int(item) for item in product]
+    product_str = ""
+    if product_list:
+        product_str = "main.tab_product_d816_4_ids = ANY(:product) AND"
+        params["product"] = product_list
+
+    type_raspr_list = [int(item) for item in type_raspr]
+
+    factory_list = [int(item) for item in selected_factories]
+    var_plans_list = [
+        int(item.get("variantPlaning", 0))
+        for idx, item in enumerate(variant_columns, start=1)
+        if str(idx) in selected_variant_compare
+    ]
+    years_list = [
+        int(item.get("year", 0))
+        for idx, item in enumerate(variant_columns, start=1)
+        if str(idx) in selected_variant_compare
+    ]
+
+    params['type_raspr'] = type_raspr_list
+    params['ei'] = ei
+    params['factory'] = factory_list
+    params['var_plans'] = var_plans_list
+    params['years'] = years_list
+
+    col_sql = text(f"""
+                        SELECT
+                            params.idx as variantColumns,
+                            {data_slice_str}
+                            sum(main.value)
+
+                        FROM tab_pererabotka_d816_4 main
+                        JOIN LATERAL unnest(CAST(:var_plans AS INTEGER[]), CAST(:years AS INTEGER[])) WITH ORDINALITY AS params(var_plan, year, idx)
+                          ON main.tab_var_plan_d816_4_ids = params.var_plan 
+                          AND main.year = params.year
+                        WHERE
+                            {product_str}
+                            main.tab_type_raspr_d816_4_ids = ANY(:type_raspr) AND
+                            {period_str}
+                            main.tab_factory_d816_4_ids = ANY(:factory) AND
+                            main.tab_ei_d816_4_ids = :ei
+                        GROUP BY {data_slice_str}params.idx
+                        ORDER BY params.idx;
+                    """)
+    if var_plans_list and years_list:
+        result = db.execute(col_sql, params).fetchall()
+        res = []
+
+        for row in result:
+            mapping = row._mapping
+            new_row = {
+                'variantColumns': row.variantcolumns
+            }
+            if data_slice in mapping:
+                new_row[data_slice] = mapping[data_slice]
+
+            # Безопасное приведение Decimal во float, если sum равен None, ставим 0.0
+            new_row['value'] = float(row.sum) if row.sum is not None else 0.0
+            res.append(new_row)
+
+        slices = {}
+        for row in res:
+            slice_key = row.get(data_slice, "all")
+            if slice_key not in slices:
+                slices[slice_key] = {}
+            slices[slice_key][row['variantColumns']] = row['value']
+
+        diff_rows = []
+        for slice_key, variants in slices.items():
+            if 1 in variants and 2 in variants:
+                v1_val = variants[1]
+                v2_val = variants[2]
+
+                # Расчет абсолютной разницы (variantColumns == 0)
+                if reverse_diff:
+                    diff_value = round(v2_val - v1_val, 3)
+                    base_val = v2_val  # При реверсе базой становится Вариант 2
+                else:
+                    diff_value = round(v1_val - v2_val, 3)
+                    base_val = v1_val  # По умолчанию Вариант 1
+
+                diff_row = {
+                    'variantColumns': 0,
+                    'value': diff_value
+                }
+                if data_slice_str:
+                    diff_row[data_slice] = slice_key
+                diff_rows.append(diff_row)
+
+                # Расчет отклонения в процентах (variantColumns == -1)
+                if base_val != 0:
+                    pct_value = round((diff_value / base_val) * 100, 2)
+                else:
+                    pct_value = 0.0
+
+                pct_row = {
+                    'variantColumns': -1,
+                    'value': pct_value
+                }
+                if data_slice_str:
+                    pct_row[data_slice] = slice_key
+                diff_rows.append(pct_row)
+
+        res.extend(diff_rows)
+
+        return res
+    else:
+        return []
+
+
+#=======================================================================================================================
+def get_calculated_dataset(selected_variant_compare, selected_factories, variant_columns):
     collection  = {
-        'frame1' : get_calc_frame1(selected_variant_compare,selected_factories,variant_columns)
+        'panel_upper_year_volume_frame1' : get_calc_volume(
+            'year',
+            [64],  # Газ
+            [5],  # Переработка
+            2,  # мл. м3 (Единица измерения)
+            selected_variant_compare,
+            selected_factories,
+            variant_columns),
+        'panel_upper_year_volume_frame2': get_calc_volume(
+            'year',
+            [67],  # Нестабильный конденсат
+            [5],  # Переработка
+            1,  # тыс тонн (Единица измерения)
+            selected_variant_compare,
+            selected_factories,
+            variant_columns),
+        'panel_upper_year_volume_frame3': get_calc_volume(
+            'year',
+            [],  # пусто
+            [5],  # Переработка
+            1,  # тыс тонн (Единица измерения)
+            selected_variant_compare,
+            selected_factories,
+            variant_columns),
+        'panel_upper_year_volume_frame4': get_calc_volume(
+            'year',
+            [],  # Пусто
+            [7],  # Производство
+            1,  # тыс тонн (Единица измерения)
+            selected_variant_compare,
+            selected_factories,
+            variant_columns),
+        'panel_middle_month_volume_frame1': get_calc_volume(
+            'month',
+            [],  # Газ
+            [5],  # Переработка
+            1,  # тыс тонн (Единица измерения)
+            selected_variant_compare,
+            selected_factories,
+            variant_columns),
+        'panel_middle_month_volume_frame2': get_calc_volume(
+            'month',
+            [],  # Газ
+            [7],  # Производство
+            1,  # тыс тонн (Единица измерения)
+            selected_variant_compare,
+            selected_factories,
+            variant_columns),
+        'panel_lower_month_volume_tab1': get_calc_volume(
+            'tab_product_d816_4_ids',
+            [],  # Газ
+            [7],  # Производство
+            1,  # тыс тонн (Единица измерения)
+            selected_variant_compare,
+            selected_factories,
+            variant_columns),
+        'panel_lower_month_volume_tab2': get_calc_volume(
+            'tab_product_d816_4_ids',
+            [],  # Газ
+            [5],  # Производство
+            1,  # тыс тонн (Единица измерения)
+            selected_variant_compare,
+            selected_factories,
+            variant_columns),
     }
     return collection

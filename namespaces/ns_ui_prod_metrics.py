@@ -143,7 +143,7 @@ class ClsGetColumnData(Resource):
 
             if v_variant_columns:
                 v_selected_factories = [factory_id for factory_id in v_selected_factories]
-                return funcs_prod_metrics.get_calculated_values(
+                return funcs_prod_metrics.get_calculated_dataset(
                     v_selected_variant_compare,
                     v_selected_factories,
                     v_variant_columns
