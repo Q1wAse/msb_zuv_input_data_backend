@@ -170,10 +170,21 @@ def convert_data_to_tab_front(result, key_name):
             final_res.append(ordered_row)
     return final_res
 #=======================================================================================================================
+
 def get_calc_volume(data_slice, product, type_raspr, ei, filters, selected_variant_compare, selected_factories, variant_columns, reverse_diff=False):
+    mapping_col = {
+        'product': 'tab_product_d816_4_ids',
+        'sobstv': 'tab_sobstv_d816_4_ids',
+        'mest': 'tab_mest_d816_4_ids',
+        'post_zuv': 'tab_post_zuv_d816_4_ids'
+    }
+
     db = uf.get_db_connection()
+    params = {}
     period_str = ""
     data_slice_str = ""
+    filter_str = ""
+
     if data_slice == 'year':
         period_str = "main.month <> 0 AND"
         data_slice_str = f"main.{data_slice},"
@@ -183,7 +194,18 @@ def get_calc_volume(data_slice, product, type_raspr, ei, filters, selected_varia
     elif data_slice == 'tab_product_d816_4_ids':
         period_str = "main.month <> 0 AND"
         data_slice_str = f"main.{data_slice},"
-    params = {}
+
+    if filters:
+        for idx, (key, value) in enumerate(filters.items()):
+            if value:
+                need_key = mapping_col.get(key, None)
+                if need_key == None:
+                    continue
+                filter_str = f'{filter_str}main.{need_key} = ANY(:flt{idx}) AND '
+                filter_list = []
+                for flt in value:
+                    filter_list.append(flt)
+                params[f'flt{idx}'] = filter_list
 
     product_list = [int(item) for item in product]
     product_str = ""
@@ -222,6 +244,7 @@ def get_calc_volume(data_slice, product, type_raspr, ei, filters, selected_varia
           ON main.tab_var_plan_d816_4_ids = params.var_plan 
           AND main.year = params.year
         WHERE
+            {filter_str}
             {product_str}
             main.tab_type_raspr_d816_4_ids = ANY(:type_raspr) AND
             {period_str}
@@ -297,9 +320,7 @@ def get_calc_volume(data_slice, product, type_raspr, ei, filters, selected_varia
 
 
 #=======================================================================================================================
-def get_calculated_dataset(selected_variant_compare, selected_factories, filter, variant_columns):
-    if filter:
-        q = 0
+def get_calculated_dataset(selected_variant_compare, selected_factories, filters, variant_columns):
     collection  = {
         'panel_upper_year_volume_frame1' : get_calc_volume(
             'year',
@@ -337,12 +358,21 @@ def get_calculated_dataset(selected_variant_compare, selected_factories, filter,
             selected_variant_compare,
             selected_factories,
             variant_columns),
+        'panel_upper_month_volume_graph1': get_calc_volume(
+            'month',
+            [64],  # Газ
+            [5],  # Переработка
+            1,  # тыс тонн (Единица измерения)
+            {},
+            selected_variant_compare,
+            selected_factories,
+            variant_columns),
         'panel_middle_month_volume_frame1': get_calc_volume(
             'month',
             [],  # Газ
             [5],  # Переработка
             1,  # тыс тонн (Единица измерения)
-            {},
+            filters,
             selected_variant_compare,
             selected_factories,
             variant_columns),
@@ -351,7 +381,7 @@ def get_calculated_dataset(selected_variant_compare, selected_factories, filter,
             [],  # Газ
             [7],  # Производство
             1,  # тыс тонн (Единица измерения)
-            {},
+            filters,
             selected_variant_compare,
             selected_factories,
             variant_columns),
@@ -374,4 +404,15 @@ def get_calculated_dataset(selected_variant_compare, selected_factories, filter,
             selected_factories,
             variant_columns), 'tab_product_d816_4_ids'),
     }
-    return collection
+    collection2 = {
+        'panel_middle_month_volume_frame1': get_calc_volume(
+            'month',
+            [],  # Газ
+            [5],  # Переработка
+            1,  # тыс тонн (Единица измерения)
+            filters,
+            selected_variant_compare,
+            selected_factories,
+            variant_columns),
+    }
+    return collection2

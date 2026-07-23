@@ -182,10 +182,10 @@ flt_container_get_prod_metrics_model = ns_ui_prod_metrics.model('ContainerGetPro
         description='Фильтры для центральных графиков',
         required=True,
         example={
-            'product' : [1,2],
-            'sobstv' : [1,2],
-            'mest' : [1,2],
-            'post_zuv' : [1,2],
+            'product' : [64,67],
+            'sobstv' : [1,5],
+            'mest' : [32,33],
+            'post_zuv' : [10,7],
         }
         # example=["1", "2", "3"]
     ),
@@ -223,7 +223,7 @@ class ClsGetColumnDataFlt(Resource):
 
             v_selected_variant_compare = ns_ui_prod_metrics.payload.get('selectedVariantCompare')
             v_selected_factories = ns_ui_prod_metrics.payload.get('selectedFactories')
-            v_filter = ns_ui_prod_metrics.payload.get('filtertMiddleVolume')
+            v_filters = ns_ui_prod_metrics.payload.get('filtertMiddleVolume')
             v_variant_columns = ns_ui_prod_metrics.payload.get('VariantColumns')
 
             if v_variant_columns:
@@ -231,7 +231,7 @@ class ClsGetColumnDataFlt(Resource):
                 return funcs_prod_metrics.get_calculated_dataset(
                     v_selected_variant_compare,
                     v_selected_factories,
-                    v_filter,
+                    v_filters,
                     v_variant_columns
                 ), 200
             else:
