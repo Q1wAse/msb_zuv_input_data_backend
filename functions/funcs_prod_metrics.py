@@ -404,15 +404,4 @@ def get_calculated_dataset(selected_variant_compare, selected_factories, filters
             selected_factories,
             variant_columns), 'tab_product_d816_4_ids'),
     }
-    collection2 = {
-        'panel_middle_month_volume_frame1': get_calc_volume(
-            'month',
-            [],  # Газ
-            [5],  # Переработка
-            1,  # тыс тонн (Единица измерения)
-            filters,
-            selected_variant_compare,
-            selected_factories,
-            variant_columns),
-    }
-    return collection2
+    return collection
