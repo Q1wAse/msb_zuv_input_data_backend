@@ -1,4 +1,4 @@
-from sqlalchemy import text
+from sqlalchemy import text, inspect
 
 import msb_zuv_input_data_backend.functions.utility_functions as uf
 
@@ -86,32 +86,89 @@ def get_calc_volume_old(data_slice, product, type_raspr, ei, selected_variant_co
     else:
         return []
 #=======================================================================================================================
+def get_tab_name_check(name):
+    db = uf.get_db_connection()
+    name_list = []
+    if db:
+        inspector = inspect(db.get_bind())
+        if inspector:
+            name_list.append(name.removesuffix('_ids'))
+            name_list.append(f"tab_view_{name.removesuffix('_ids').removeprefix('tab_')}")
+            for tab_name in name_list:
+                if inspector.has_table(tab_name):
+                    return tab_name
+    return ''
+#=======================================================================================================================
 def convert_data_to_tab_front(result, key_name):
-    # db = uf.get_db_connection()
-    # key_list = []
-    # for res in result:
-    #     key = res.get(key_name, None)
-    #     if key:
-    #         if key not in key_list:
-    #             key_list.append(key)
-    # tab_name = key_name.removesuffix('_ids')
-    # if key_list and tab_name:
-    #     col_sql = text(f"""
-    #         SELECT
-    #             id,
-    #             name
-    #         FROM {tab_name}
-    #         WHERE
-    #             id = ANY(:key)
-    #     """)
-    #     query_result = db.execute(col_sql,
-    #       {
-    #           'key' : key_list
-    #       }
-    #     ).fetchall()
-    #     for row in query_result:
-    #         q = 0
-    return result
+    db = uf.get_db_connection()
+    key_list = []
+    dict_key_name = []
+    res_list = []
+    for res in result:
+        key = res.get(key_name, None)
+        if key:
+            if key not in key_list:
+                key_list.append(key)
+    tab_name = get_tab_name_check(key_name)
+    if key_list and tab_name:
+        col_sql = text(f"""
+            SELECT
+                id,
+                name
+            FROM {tab_name}
+            WHERE
+                id = ANY(:key)
+        """)
+        query_result = db.execute(col_sql,
+          {
+              'key' : key_list
+          }
+        ).fetchall()
+        for row in query_result:
+            dict_key_name.append(
+                {
+                    'id' : row.id,
+                    'name' : row.name
+                }
+            )
+        grouped = {}
+        for item in result:
+            key_name_value = item.get(key_name, "all")
+            # if key_name_value is None:
+            #     continue
+            if key_name_value not in grouped:
+                grouped[key_name_value] = {}
+                if key_name in item:
+                    grouped[key_name_value][key_name] = key_name_value
+
+            var_num = item.get("variantColumns")
+
+            if var_num == 0:
+                new_add_param = "deviation"
+            elif var_num == -1:
+                new_add_param = "percents"
+            else:
+                new_add_param = f"variant{var_num}"
+
+            grouped[key_name_value][new_add_param] = item["value"]
+
+        processed_list = list(grouped.values())
+        final_res = []
+
+        for slice_id, values in grouped.items():
+            # 1. Сначала всегда идет ключ среза (например, 'month' или 'tab_product_d816_4_ids')
+            ordered_row = {}
+            if slice_id != "all":
+                ordered_row['name'] = next((item['name'] for item in dict_key_name if item.get('id') == slice_id), None)
+                # ordered_row[key_name] = slice_id
+
+            ordered_row["variant1"] = values.get("variant1", 0.0)
+            ordered_row["variant2"] = values.get("variant2", 0.0)
+            ordered_row["deviation"] = values.get("deviation", 0.0)
+            ordered_row["percents"] = values.get("percents", 0.0)
+
+            final_res.append(ordered_row)
+    return final_res
 #=======================================================================================================================
 def get_calc_volume(data_slice, product, type_raspr, ei, filters, selected_variant_compare, selected_factories, variant_columns, reverse_diff=False):
     db = uf.get_db_connection()
@@ -298,26 +355,6 @@ def get_calculated_dataset(selected_variant_compare, selected_factories, filter,
             selected_variant_compare,
             selected_factories,
             variant_columns),
-        'panel_lower_month_volume_tab1': get_calc_volume(
-            'tab_product_d816_4_ids',
-            [],  # Газ
-            [7],  # Производство
-            1,  # тыс тонн (Единица измерения)
-            {},
-            selected_variant_compare,
-            selected_factories,
-            variant_columns),
-        'panel_lower_month_volume_tab2': get_calc_volume(
-            'tab_product_d816_4_ids',
-            [],  # Газ
-            [5],  # Производство
-            1,  # тыс тонн (Единица измерения)
-            {},
-            selected_variant_compare,
-            selected_factories,
-            variant_columns),
-    }
-    collection2 = {
         'panel_lower_month_volume_tab1': convert_data_to_tab_front(get_calc_volume(
             'tab_product_d816_4_ids',
             [],  # Газ
