@@ -86,8 +86,34 @@ def get_calc_volume_old(data_slice, product, type_raspr, ei, selected_variant_co
     else:
         return []
 #=======================================================================================================================
+def convert_data_to_tab_front(result, key_name):
+    db = uf.get_db_connection()
+    key_list = []
+    for res in result:
+        key = res.get(key_name, None)
+        if key:
+            if key not in key_list:
+                key_list.append(key)
+    tab_name = key_name.removesuffix('_ids')
+    if key_list and tab_name:
+        col_sql = text(f"""
+            SELECT
+                id,
+                name 
+            FROM {tab_name}
+            WHERE
+                id = ANY(:key)
+        """)
+        query_result = db.execute(col_sql,
+          {
+              'key' : key_list
+          }
+        ).fetchall()
+        for row in query_result:
+            q = 0
+    return result
 #=======================================================================================================================
-def get_calc_volume(data_slice, product, type_raspr, ei, selected_variant_compare, selected_factories, variant_columns, reverse_diff=False):
+def get_calc_volume(data_slice, product, type_raspr, ei, filters, selected_variant_compare, selected_factories, variant_columns, reverse_diff=False):
     db = uf.get_db_connection()
     period_str = ""
     data_slice_str = ""
@@ -129,24 +155,24 @@ def get_calc_volume(data_slice, product, type_raspr, ei, selected_variant_compar
     params['years'] = years_list
 
     col_sql = text(f"""
-                        SELECT
-                            params.idx as variantColumns,
-                            {data_slice_str}
-                            sum(main.value)
-
-                        FROM tab_pererabotka_d816_4 main
-                        JOIN LATERAL unnest(CAST(:var_plans AS INTEGER[]), CAST(:years AS INTEGER[])) WITH ORDINALITY AS params(var_plan, year, idx)
-                          ON main.tab_var_plan_d816_4_ids = params.var_plan 
-                          AND main.year = params.year
-                        WHERE
-                            {product_str}
-                            main.tab_type_raspr_d816_4_ids = ANY(:type_raspr) AND
-                            {period_str}
-                            main.tab_factory_d816_4_ids = ANY(:factory) AND
-                            main.tab_ei_d816_4_ids = :ei
-                        GROUP BY {data_slice_str}params.idx
-                        ORDER BY params.idx;
-                    """)
+        SELECT
+            params.idx as variantColumns,
+            {data_slice_str}
+            sum(main.value)
+    
+        FROM tab_pererabotka_d816_4 main
+        JOIN LATERAL unnest(CAST(:var_plans AS INTEGER[]), CAST(:years AS INTEGER[])) WITH ORDINALITY AS params(var_plan, year, idx)
+          ON main.tab_var_plan_d816_4_ids = params.var_plan 
+          AND main.year = params.year
+        WHERE
+            {product_str}
+            main.tab_type_raspr_d816_4_ids = ANY(:type_raspr) AND
+            {period_str}
+            main.tab_factory_d816_4_ids = ANY(:factory) AND
+            main.tab_ei_d816_4_ids = :ei
+        GROUP BY {data_slice_str}params.idx
+        ORDER BY params.idx
+    """)
     if var_plans_list and years_list:
         result = db.execute(col_sql, params).fetchall()
         res = []
@@ -214,13 +240,16 @@ def get_calc_volume(data_slice, product, type_raspr, ei, selected_variant_compar
 
 
 #=======================================================================================================================
-def get_calculated_dataset(selected_variant_compare, selected_factories, variant_columns):
+def get_calculated_dataset(selected_variant_compare, selected_factories, filter, variant_columns):
+    if filter:
+        q = 0
     collection  = {
         'panel_upper_year_volume_frame1' : get_calc_volume(
             'year',
             [64],  # Газ
             [5],  # Переработка
             2,  # мл. м3 (Единица измерения)
+            {},
             selected_variant_compare,
             selected_factories,
             variant_columns),
@@ -229,6 +258,7 @@ def get_calculated_dataset(selected_variant_compare, selected_factories, variant
             [67],  # Нестабильный конденсат
             [5],  # Переработка
             1,  # тыс тонн (Единица измерения)
+            {},
             selected_variant_compare,
             selected_factories,
             variant_columns),
@@ -237,6 +267,7 @@ def get_calculated_dataset(selected_variant_compare, selected_factories, variant
             [],  # пусто
             [5],  # Переработка
             1,  # тыс тонн (Единица измерения)
+            {},
             selected_variant_compare,
             selected_factories,
             variant_columns),
@@ -245,6 +276,7 @@ def get_calculated_dataset(selected_variant_compare, selected_factories, variant
             [],  # Пусто
             [7],  # Производство
             1,  # тыс тонн (Единица измерения)
+            {},
             selected_variant_compare,
             selected_factories,
             variant_columns),
@@ -253,6 +285,7 @@ def get_calculated_dataset(selected_variant_compare, selected_factories, variant
             [],  # Газ
             [5],  # Переработка
             1,  # тыс тонн (Единица измерения)
+            {},
             selected_variant_compare,
             selected_factories,
             variant_columns),
@@ -261,6 +294,7 @@ def get_calculated_dataset(selected_variant_compare, selected_factories, variant
             [],  # Газ
             [7],  # Производство
             1,  # тыс тонн (Единица измерения)
+            {},
             selected_variant_compare,
             selected_factories,
             variant_columns),
@@ -269,6 +303,7 @@ def get_calculated_dataset(selected_variant_compare, selected_factories, variant
             [],  # Газ
             [7],  # Производство
             1,  # тыс тонн (Единица измерения)
+            {},
             selected_variant_compare,
             selected_factories,
             variant_columns),
@@ -277,8 +312,29 @@ def get_calculated_dataset(selected_variant_compare, selected_factories, variant
             [],  # Газ
             [5],  # Производство
             1,  # тыс тонн (Единица измерения)
+            {},
             selected_variant_compare,
             selected_factories,
             variant_columns),
     }
-    return collection
+    collection2 = {
+        'panel_lower_month_volume_tab1': convert_data_to_tab_front(get_calc_volume(
+            'tab_product_d816_4_ids',
+            [],  # Газ
+            [7],  # Производство
+            1,  # тыс тонн (Единица измерения)
+            {},
+            selected_variant_compare,
+            selected_factories,
+            variant_columns), 'tab_product_d816_4_ids'),
+        'panel_lower_month_volume_tab2': convert_data_to_tab_front(get_calc_volume(
+            'tab_product_d816_4_ids',
+            [],  # Газ
+            [5],  # Производство
+            1,  # тыс тонн (Единица измерения)
+            {},
+            selected_variant_compare,
+            selected_factories,
+            variant_columns), 'tab_product_d816_4_ids'),
+    }
+    return collection2
