@@ -87,30 +87,30 @@ def get_calc_volume_old(data_slice, product, type_raspr, ei, selected_variant_co
         return []
 #=======================================================================================================================
 def convert_data_to_tab_front(result, key_name):
-    db = uf.get_db_connection()
-    key_list = []
-    for res in result:
-        key = res.get(key_name, None)
-        if key:
-            if key not in key_list:
-                key_list.append(key)
-    tab_name = key_name.removesuffix('_ids')
-    if key_list and tab_name:
-        col_sql = text(f"""
-            SELECT
-                id,
-                name
-            FROM {tab_name}
-            WHERE
-                id = ANY(:key)
-        """)
-        query_result = db.execute(col_sql,
-          {
-              'key' : key_list
-          }
-        ).fetchall()
-        for row in query_result:
-            q = 0
+    # db = uf.get_db_connection()
+    # key_list = []
+    # for res in result:
+    #     key = res.get(key_name, None)
+    #     if key:
+    #         if key not in key_list:
+    #             key_list.append(key)
+    # tab_name = key_name.removesuffix('_ids')
+    # if key_list and tab_name:
+    #     col_sql = text(f"""
+    #         SELECT
+    #             id,
+    #             name
+    #         FROM {tab_name}
+    #         WHERE
+    #             id = ANY(:key)
+    #     """)
+    #     query_result = db.execute(col_sql,
+    #       {
+    #           'key' : key_list
+    #       }
+    #     ).fetchall()
+    #     for row in query_result:
+    #         q = 0
     return result
 #=======================================================================================================================
 def get_calc_volume(data_slice, product, type_raspr, ei, filters, selected_variant_compare, selected_factories, variant_columns, reverse_diff=False):
