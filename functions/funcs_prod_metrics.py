@@ -86,14 +86,25 @@ def get_calc_volume_old(data_slice, product, type_raspr, ei, selected_variant_co
     else:
         return []
 #=======================================================================================================================
+def removeprefix(text: str, prefix: str) -> str:
+    if text.startswith(prefix):
+        result = text[len(prefix):]
+    else:
+        result = text
+    return result
+def removesuffix(text: str, suffix: str) -> str:
+    if suffix and text.endswith(suffix):
+        return text[:-len(suffix)]
+    return text
+
 def get_tab_name_check(name):
     db = uf.get_db_connection()
     name_list = []
     if db:
         inspector = inspect(db.get_bind())
         if inspector:
-            name_list.append(name.removesuffix('_ids'))
-            name_list.append(f"tab_view_{name.removesuffix('_ids').removeprefix('tab_')}")
+            name_list.append(removesuffix(name,'_ids'))
+            name_list.append(f"tab_view_{removeprefix(removesuffix(name,'_ids'),'tab_')}")
             for tab_name in name_list:
                 if inspector.has_table(tab_name):
                     return tab_name
@@ -180,7 +191,7 @@ def get_calc_volume(data_slice, product, type_raspr, ei, filters, selected_varia
     }
 
     db = uf.get_db_connection()
-    params = {}
+    query_params = {}
     period_str = ""
     data_slice_str = ""
     filter_str = ""
@@ -205,13 +216,13 @@ def get_calc_volume(data_slice, product, type_raspr, ei, filters, selected_varia
                 filter_list = []
                 for flt in value:
                     filter_list.append(flt)
-                params[f'flt{idx}'] = filter_list
+                query_params[f'flt{idx}'] = filter_list
 
     product_list = [int(item) for item in product]
     product_str = ""
     if product_list:
         product_str = "main.tab_product_d816_4_ids = ANY(:product) AND"
-        params["product"] = product_list
+        query_params["product"] = product_list
 
     type_raspr_list = [int(item) for item in type_raspr]
 
@@ -227,11 +238,11 @@ def get_calc_volume(data_slice, product, type_raspr, ei, filters, selected_varia
         if str(idx) in selected_variant_compare
     ]
 
-    params['type_raspr'] = type_raspr_list
-    params['ei'] = ei
-    params['factory'] = factory_list
-    params['var_plans'] = var_plans_list
-    params['years'] = years_list
+    query_params['type_raspr'] = type_raspr_list
+    query_params['ei'] = ei
+    query_params['factory'] = factory_list
+    query_params['var_plans'] = var_plans_list
+    query_params['years'] = years_list
 
     col_sql = text(f"""
         SELECT
@@ -254,7 +265,7 @@ def get_calc_volume(data_slice, product, type_raspr, ei, filters, selected_varia
         ORDER BY params.idx
     """)
     if var_plans_list and years_list:
-        result = db.execute(col_sql, params).fetchall()
+        result = db.execute(col_sql, query_params).fetchall()
         res = []
 
         for row in result:
@@ -320,7 +331,11 @@ def get_calc_volume(data_slice, product, type_raspr, ei, filters, selected_varia
 
 
 #=======================================================================================================================
-def get_calculated_dataset(selected_variant_compare, selected_factories, filters, variant_columns):
+def get_calculated_dataset(selected_variant_compare,
+                           selected_factories,
+                           filter_middle_volume_frame1,
+                           filter_middle_volume_frame2,
+                           variant_columns):
     collection  = {
         'panel_upper_year_volume_frame1' : get_calc_volume(
             'year',
@@ -372,7 +387,7 @@ def get_calculated_dataset(selected_variant_compare, selected_factories, filters
             [],  # Газ
             [5],  # Переработка
             1,  # тыс тонн (Единица измерения)
-            filters,
+            filter_middle_volume_frame1,
             selected_variant_compare,
             selected_factories,
             variant_columns),
@@ -381,7 +396,7 @@ def get_calculated_dataset(selected_variant_compare, selected_factories, filters
             [],  # Газ
             [7],  # Производство
             1,  # тыс тонн (Единица измерения)
-            filters,
+            filter_middle_volume_frame2,
             selected_variant_compare,
             selected_factories,
             variant_columns),
