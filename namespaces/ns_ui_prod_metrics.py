@@ -146,6 +146,7 @@ class ClsGetColumnData(Resource):
                     v_selected_variant_compare,
                     v_selected_factories,
                     {},
+                    {},
                     v_variant_columns
                 ), 200
             else:
