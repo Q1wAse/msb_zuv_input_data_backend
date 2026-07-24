@@ -333,90 +333,111 @@ def get_calc_volume(data_slice, product, type_raspr, ei, filters, selected_varia
 #=======================================================================================================================
 def get_calculated_dataset(selected_variant_compare,
                            selected_factories,
-                           filter_middle_volume_frame1,
-                           filter_middle_volume_frame2,
+                           filters,
                            variant_columns):
-    collection  = {
-        'panel_upper_year_volume_frame1' : get_calc_volume(
-            'year',
-            [64],  # Газ
-            [5],  # Переработка
-            2,  # мл. м3 (Единица измерения)
-            {},
-            selected_variant_compare,
-            selected_factories,
-            variant_columns),
-        'panel_upper_year_volume_frame2': get_calc_volume(
-            'year',
-            [67],  # Нестабильный конденсат
-            [5],  # Переработка
-            1,  # тыс тонн (Единица измерения)
-            {},
-            selected_variant_compare,
-            selected_factories,
-            variant_columns),
-        'panel_upper_year_volume_frame3': get_calc_volume(
-            'year',
-            [],  # пусто
-            [5],  # Переработка
-            1,  # тыс тонн (Единица измерения)
-            {},
-            selected_variant_compare,
-            selected_factories,
-            variant_columns),
-        'panel_upper_year_volume_frame4': get_calc_volume(
-            'year',
-            [],  # Пусто
-            [7],  # Производство
-            1,  # тыс тонн (Единица измерения)
-            {},
-            selected_variant_compare,
-            selected_factories,
-            variant_columns),
-        'panel_upper_month_volume_graph1': get_calc_volume(
-            'month',
-            [64],  # Газ
-            [5],  # Переработка
-            1,  # тыс тонн (Единица измерения)
-            {},
-            selected_variant_compare,
-            selected_factories,
-            variant_columns),
-        'panel_middle_month_volume_frame1': get_calc_volume(
-            'month',
-            [],  # Газ
-            [5],  # Переработка
-            1,  # тыс тонн (Единица измерения)
-            filter_middle_volume_frame1,
-            selected_variant_compare,
-            selected_factories,
-            variant_columns),
-        'panel_middle_month_volume_frame2': get_calc_volume(
-            'month',
-            [],  # Газ
-            [7],  # Производство
-            1,  # тыс тонн (Единица измерения)
-            filter_middle_volume_frame2,
-            selected_variant_compare,
-            selected_factories,
-            variant_columns),
-        'panel_lower_month_volume_tab1': convert_data_to_tab_front(get_calc_volume(
-            'tab_product_d816_4_ids',
-            [],  # Газ
-            [7],  # Производство
-            1,  # тыс тонн (Единица измерения)
-            {},
-            selected_variant_compare,
-            selected_factories,
-            variant_columns), 'tab_product_d816_4_ids'),
-        'panel_lower_month_volume_tab2': convert_data_to_tab_front(get_calc_volume(
-            'tab_product_d816_4_ids',
-            [],  # Газ
-            [5],  # Производство
-            1,  # тыс тонн (Единица измерения)
-            {},
-            selected_variant_compare,
-            selected_factories,
-            variant_columns), 'tab_product_d816_4_ids'),
-    }
+    if filters:
+        collection = {
+            'panel_middle_month_volume_frame1': get_calc_volume(
+                'month',
+                [],  # Газ
+                [5],  # Переработка
+                1,  # тыс тонн (Единица измерения)
+                filters,
+                selected_variant_compare,
+                selected_factories,
+                variant_columns),
+            'panel_middle_month_volume_frame2': get_calc_volume(
+                'month',
+                [],  # Газ
+                [7],  # Производство
+                1,  # тыс тонн (Единица измерения)
+                filters,
+                selected_variant_compare,
+                selected_factories,
+                variant_columns),
+        }
+    else:
+        collection  = {
+            'panel_upper_year_volume_frame1' : get_calc_volume(
+                'year',
+                [64],  # Газ
+                [5],  # Переработка
+                2,  # мл. м3 (Единица измерения)
+                {},
+                selected_variant_compare,
+                selected_factories,
+                variant_columns),
+            'panel_upper_year_volume_frame2': get_calc_volume(
+                'year',
+                [67],  # Нестабильный конденсат
+                [5],  # Переработка
+                1,  # тыс тонн (Единица измерения)
+                {},
+                selected_variant_compare,
+                selected_factories,
+                variant_columns),
+            'panel_upper_year_volume_frame3': get_calc_volume(
+                'year',
+                [],  # пусто
+                [5],  # Переработка
+                1,  # тыс тонн (Единица измерения)
+                {},
+                selected_variant_compare,
+                selected_factories,
+                variant_columns),
+            'panel_upper_year_volume_frame4': get_calc_volume(
+                'year',
+                [],  # Пусто
+                [7],  # Производство
+                1,  # тыс тонн (Единица измерения)
+                {},
+                selected_variant_compare,
+                selected_factories,
+                variant_columns),
+            'panel_upper_month_volume_graph1': get_calc_volume(
+                'month',
+                [64],  # Газ
+                [5],  # Переработка
+                1,  # тыс тонн (Единица измерения)
+                {},
+                selected_variant_compare,
+                selected_factories,
+                variant_columns),
+            'panel_middle_month_volume_frame1': get_calc_volume(
+                'month',
+                [],  # Газ
+                [5],  # Переработка
+                1,  # тыс тонн (Единица измерения)
+                {},
+                selected_variant_compare,
+                selected_factories,
+                variant_columns),
+            'panel_middle_month_volume_frame2': get_calc_volume(
+                'month',
+                [],  # Газ
+                [7],  # Производство
+                1,  # тыс тонн (Единица измерения)
+                {},
+                selected_variant_compare,
+                selected_factories,
+                variant_columns),
+            'panel_lower_month_volume_tab1': convert_data_to_tab_front(get_calc_volume(
+                'tab_product_d816_4_ids',
+                [],  # Газ
+                [7],  # Производство
+                1,  # тыс тонн (Единица измерения)
+                {},
+                selected_variant_compare,
+                selected_factories,
+                variant_columns), 'tab_product_d816_4_ids'),
+            'panel_lower_month_volume_tab2': convert_data_to_tab_front(get_calc_volume(
+                'tab_product_d816_4_ids',
+                [],  # Газ
+                [5],  # Производство
+                1,  # тыс тонн (Единица измерения)
+                {},
+                selected_variant_compare,
+                selected_factories,
+                variant_columns), 'tab_product_d816_4_ids'),
+        }
     return collection
