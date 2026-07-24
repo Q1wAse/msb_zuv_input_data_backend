@@ -64,8 +64,8 @@ class ClsStructDataProdMetrics(Resource):
                 })
 
             total = {
-                'factories': uf.get_pagin_data('factories', '', 1, 100),
-                'data_type': uf.get_pagin_data('data_type', '', 1, 100),
+                'factories': uf.get_pagin_data('factories_kao', '', 1, 100),
+                'data_type': uf.get_pagin_data('data_type_kao', '', 1, 100),
                 'versions': list(grouped.values()),
                 'years' : uf.get_pagin_data('view_year', '', 1, 100),
                 'product' : uf.get_pagin_data('view_product', '', 1, 1000),
@@ -125,7 +125,7 @@ main_container_get_prod_metrics_model = ns_ui_prod_metrics.model('ContainerGetPr
                 "year": "2026"
             },
             {
-                "typeData": "15",   #1 - факт
+                "typeData": "2",   #2 - факт
                 "year": "2026"
             }
         ]
@@ -209,7 +209,7 @@ flt_container_get_prod_metrics_model = ns_ui_prod_metrics.model('ContainerGetPro
                 "year": "2026"
             },
             {
-                "typeData": "15",   #1 - факт
+                "typeData": "2",   #2 - факт
                 "year": "2026"
             }
         ]

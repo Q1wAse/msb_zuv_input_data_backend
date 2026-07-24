@@ -77,8 +77,12 @@ TABLES_MAP = {
         'tab_name': 'tab_product_d816_4',
         'fields': 'id, name'
     },
-    'factory': {
+    'factories_kao': {
         'tab_name': 'tab_factory_d816_4',
+        'fields': 'id, name'
+    },
+    'data_type_kao': {
+        'tab_name': 'tab_data_type_d816_4',
         'fields': 'id, name'
     },
     'type_raspr': {
