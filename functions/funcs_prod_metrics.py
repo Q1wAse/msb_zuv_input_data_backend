@@ -2,8 +2,6 @@ from sqlalchemy import text, inspect
 
 import msb_zuv_input_data_backend.functions.utility_functions as uf
 
-def get_struct_prod_metrics():
-    return [0,1]
 #=======================================================================================================================
 # Рассчитать для графика объёмы для года
 def get_calc_volume_old(data_slice, product, type_raspr, ei, selected_variant_compare, selected_factories, variant_columns):
@@ -276,8 +274,8 @@ def get_calc_volume(data_slice, product, type_raspr, ei, filters, selected_varia
             if data_slice in mapping:
                 new_row[data_slice] = mapping[data_slice]
 
-            # Безопасное приведение Decimal во float, если sum равен None, ставим 0.0
-            new_row['value'] = float(row.sum) if row.sum is not None else 0.0
+            # Безопасное приведение Decimal в округлённый float, если sum равен None, ставим 0.00
+            new_row['value'] = round(float(row.sum),2) if row.sum is not None else 0.00
             res.append(new_row)
 
         slices = {}
@@ -295,10 +293,10 @@ def get_calc_volume(data_slice, product, type_raspr, ei, filters, selected_varia
 
                 # Расчет абсолютной разницы (variantColumns == 0)
                 if reverse_diff:
-                    diff_value = round(v2_val - v1_val, 3)
+                    diff_value = round(v2_val - v1_val, 2)
                     base_val = v2_val  # При реверсе базой становится Вариант 2
                 else:
-                    diff_value = round(v1_val - v2_val, 3)
+                    diff_value = round(v1_val - v2_val, 2)
                     base_val = v1_val  # По умолчанию Вариант 1
 
                 diff_row = {
