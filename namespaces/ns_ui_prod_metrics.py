@@ -45,6 +45,9 @@ class ClsStructDataProdMetrics(Resource):
             for item in variants:
                 v_id = item["tab_vers_plan_ids"]
 
+                if v_id == 0:
+                    continue
+
                 if v_id not in grouped:
                     grouped[v_id] = {
                         "version": {
