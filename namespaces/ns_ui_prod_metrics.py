@@ -68,10 +68,6 @@ class ClsStructDataProdMetrics(Resource):
                 'data_type': uf.get_pagin_data('data_type_kao', '', 1, 100),
                 'versions': list(grouped.values()),
                 'years' : uf.get_pagin_data('view_year', '', 1, 100),
-                'product' : uf.get_pagin_data('view_product', '', 1, 1000),
-                'sobstv' : uf.get_pagin_data('sobstv', '', 1, 100),
-                'mest' : uf.get_pagin_data('mest', '', 1, 100),
-                'post_zuv' : uf.get_pagin_data('post_zuv', '', 1, 1000),
             }
 
             return total, 200
