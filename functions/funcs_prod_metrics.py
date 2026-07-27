@@ -108,8 +108,9 @@ def get_tab_name_check(name):
                     return tab_name
     return ''
 #=======================================================================================================================
-def convert_data_to_tab_front(result, key_name):
+def convert_data_to_tab_front(result, key_name, reverse_diff=False):
     db = uf.get_db_connection()
+    final_res = []
     key_list = []
     dict_key_name = []
     res_list = []
@@ -162,21 +163,50 @@ def convert_data_to_tab_front(result, key_name):
             grouped[key_name_value][new_add_param] = item["value"]
 
         processed_list = list(grouped.values())
-        final_res = []
 
         for slice_id, values in grouped.items():
-            # 1. Сначала всегда идет ключ среза (например, 'month' или 'tab_product_d816_4_ids')
+            # Сначала всегда идет ключ среза (например, 'month' или 'tab_product_d816_4_ids')
             ordered_row = {}
             if slice_id != "all":
                 ordered_row['name'] = next((item['name'] for item in dict_key_name if item.get('id') == slice_id), None)
                 # ordered_row[key_name] = slice_id
 
-            ordered_row["variant1"] = values.get("variant1", 0.0)
-            ordered_row["variant2"] = values.get("variant2", 0.0)
-            ordered_row["deviation"] = values.get("deviation", 0.0)
-            ordered_row["percents"] = values.get("percents", 0.0)
+            ordered_row['variant1'] = values.get('variant1', 0.0)
+            ordered_row['variant2'] = values.get('variant2', 0.0)
+            ordered_row['deviation'] = values.get('deviation', 0.0)
+            ordered_row['percents'] = values.get('percents', 0.0)
 
             final_res.append(ordered_row)
+        dict_total = {
+            'sum' : True,
+            'variant1' : 0.0,
+            'variant2' : 0.0,
+            'deviation' : 0.0,
+            'percents' : 0.0,
+        }
+        for res in final_res:
+            dict_total['variant1'] += res.get('variant1', 0.0)
+            dict_total['variant2'] += res.get('variant2', 0.0)
+        #==============================================================
+        v1_val = dict_total['variant1']
+        v2_val = dict_total['variant2']
+
+        if reverse_diff:
+            diff_value = round(v2_val - v1_val, 2)
+            base_val = v2_val
+        else:
+            diff_value = round(v1_val - v2_val, 2)
+            base_val = v1_val
+
+        if base_val != 0:
+            pct_value = round((diff_value / base_val) * 100, 2)
+        else:
+            pct_value = 0.0
+
+        dict_total['deviation'] = diff_value
+        dict_total['percents'] = pct_value
+        final_res.append(dict_total)
+        #==============================================================
     return final_res
 #=======================================================================================================================
 
@@ -323,11 +353,31 @@ def get_calc_volume(data_slice, product, type_raspr, ei, filters, selected_varia
 
         res.extend(diff_rows)
 
+        # Для развёртки по месяцам наполняем нулями в месяцы, которые пустые и сортируем для фронта
+        if data_slice == 'month':
+            collect_column_variant = {item.get('variantColumns') for item in res if 'variantColumns' in item}
+            for i in range(1, 13):
+                for col_var in collect_column_variant:
+                    exists = any(item.get('variantColumns') == col_var and item.get('month') == i for item in res)
+                    if not exists:
+                        res.append(
+                            {
+                                'variantColumns': col_var,
+                                'month': i,
+                                'value' : 0.00
+                            })
+            order_priority = {
+                1   : 0,
+                2   : 1,
+                0   : 2,
+                -1  : 3
+            }
+            # "-5" несуществующий ключ для метки некорректной сортировки
+            res.sort(key=lambda item: (order_priority.get(item['variantColumns'],-5), item['month']))
+
         return res
     else:
         return []
-
-
 #=======================================================================================================================
 def get_calculated_dataset(selected_variant_compare,
                            selected_factories,
@@ -403,7 +453,7 @@ def get_calculated_dataset(selected_variant_compare,
                 variant_columns),
             'panel_middle_month_volume_frame1': get_calc_volume(
                 'month',
-                [],  # Газ
+                [],  #
                 [5],  # Переработка
                 1,  # тыс тонн (Единица измерения)
                 {},
@@ -439,3 +489,46 @@ def get_calculated_dataset(selected_variant_compare,
                 variant_columns), 'tab_product_d816_4_ids'),
         }
     return collection
+#=======================================================================================================================
+def get_exist_factories(tab_id):
+    db = uf.get_db_connection()
+    res = []
+    tab_name = ''
+    fields_list = []
+    as_name_factory = 'factory'
+    if tab_id:
+        tab_map = uf.TABLES_MAP.get(tab_id, None)
+        if tab_map:
+            tab_name = tab_map.get('tab_name', '')
+            tab_fields = tab_map.get('fields', '')
+            fields_list = [f.strip() for f in tab_fields.split(',')]
+            fields = ', '.join([f'{as_name_factory}.{f.strip()}' for f in tab_fields.split(',')])
+    if tab_name and fields_list and len(fields_list) == 2:
+        sql_text = text(f"""
+            SELECT
+                {fields}
+            FROM
+                tab_pererabotka_d816_4 as pererab
+            JOIN
+                {tab_name} as {as_name_factory}
+            ON
+                pererab.tab_factory_d816_4_ids =
+                {as_name_factory}.id
+            WHERE
+                pererab.tab_type_raspr_d816_4_ids IN (5,7)
+            GROUP BY
+                {fields}
+            ORDER BY 
+                {as_name_factory}.id
+        """)
+        result = db.execute(sql_text).fetchall()
+        if result:
+            for row in result:
+                new_row = {}
+                mapping = row._mapping
+                for f in fields_list:
+                    if mapping.get(f, None):
+                        new_row[f] = mapping[f]
+                if new_row:
+                    res.append(new_row)
+    return res

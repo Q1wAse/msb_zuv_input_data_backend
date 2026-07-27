@@ -95,5 +95,11 @@ def test_formula(formula):
     print(formula==new_fromula)
     return 0
 
-for i, formula in enumerate(formulas):
-    test_formula(formula)
+# for i, formula in enumerate(formulas):
+#     test_formula(formula)
+
+fields = 'id, name'
+# fields_list = str([f'factory.{f.strip()},' for f in fields.split(',')])
+fields_list = ', '.join([f'factory.{f.strip()}' for f in fields.split(',')])
+print(fields_list)
+# print(len(fields_list))

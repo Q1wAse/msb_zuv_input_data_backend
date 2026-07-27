@@ -64,7 +64,7 @@ class ClsStructDataProdMetrics(Resource):
                 })
 
             total = {
-                'factories': uf.get_pagin_data('factories_kao', '', 1, 100),
+                'factories': funcs_prod_metrics.get_exist_factories('factories_kao'),
                 'data_type': uf.get_pagin_data('data_type_kao', '', 1, 100),
                 'versions': list(grouped.values()),
                 'years' : uf.get_pagin_data('view_year', '', 1, 100),
