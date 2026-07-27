@@ -602,16 +602,17 @@ def get_exist_factory_collect(factory_id):
 #=======================================================================================================================
 def get_calculated_dataset(selected_variant_compare,
                            selected_factories,
-                           filters,
+                           v_filters_middle_volume_frame1,
+                           v_filters_middle_volume_frame2,
                            variant_columns):
-    if filters:
+    if v_filters_middle_volume_frame1 or v_filters_middle_volume_frame2:
         collection = {
             'panel_middle_month_volume_frame1': get_calc_volume(
                 'month',
                 [],  # Газ
                 [5],  # Переработка
                 1,  # тыс тонн (Единица измерения)
-                filters,
+                v_filters_middle_volume_frame1,
                 selected_variant_compare,
                 selected_factories,
                 variant_columns),
@@ -620,7 +621,7 @@ def get_calculated_dataset(selected_variant_compare,
                 [],  # Газ
                 [7],  # Производство
                 1,  # тыс тонн (Единица измерения)
-                filters,
+                v_filters_middle_volume_frame2,
                 selected_variant_compare,
                 selected_factories,
                 variant_columns),
