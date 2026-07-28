@@ -226,12 +226,10 @@ def get_list_percent_from_lists(list_base,list_slice):
                 v1_val2 = list_slice[i].get('variant1', 0.0)
                 v2_val1 = list_base[i].get('variant2', 0.0)
                 v2_val2 = list_slice[i].get('variant2', 0.0)
-                v1_prc = round( v1_val2 / v1_val1,2) if v1_val1 != 0 else 0.0
-                v2_prc = round( v2_val2 / v2_val1,2) if v2_val1 != 0 else 0.0
                 result.append({
                     'month' : list_base[i].get('month', 0),
-                    'variant1' : v1_prc,
-                    'variant2' : v2_prc
+                    'variant1' : round( v1_val2 / v1_val1,2) * 100 if v1_val1 != 0 else 0.0,
+                    'variant2' : round( v2_val2 / v2_val1,2) * 100 if v2_val1 != 0 else 0.0
                 })
     return result
 #=======================================================================================================================
@@ -333,17 +331,20 @@ def get_calc_volume(
     query_params = {}
     period_str = ""
     data_slice_str = ""
+    group_by_str = ""
     filter_str = ""
 
     if data_slice == 'year':
         period_str = "main.month <> 0 AND"
-        data_slice_str = f"main.{data_slice},"
+        data_slice_str = f"string_agg(DISTINCT params.year::text, ',' ORDER BY params.year::text) AS {data_slice},"
     elif data_slice == 'month':
         period_str = "main.month <> 0 AND"
-        data_slice_str = f"main.{data_slice},"
+        data_slice_str = f"main.{data_slice}::text,"
+        group_by_str = f"GROUP BY {data_slice_str.replace(',','')}"
     elif data_slice == 'tab_product_d816_4_ids':
         period_str = "main.month <> 0 AND"
         data_slice_str = f"main.{data_slice},"
+        group_by_str = f"GROUP BY {data_slice_str.replace(',', '')}"
 
     if filters:
         for idx, (key, value) in enumerate(filters.items()):
@@ -423,7 +424,7 @@ def get_calc_volume(
             {period_str}
             main.tab_factory_d816_4_ids = ANY(:factory) AND
             main.tab_ei_d816_4_ids = :ei
-        GROUP BY {data_slice_str.replace(',','')}
+        {group_by_str}
     """)
     if var_plans_list and years_list:
         result = db.execute(col_sql, query_params).fetchall()
@@ -453,7 +454,7 @@ def get_calc_volume(
                     for r in res:
                         if r.get(data_slice, None) == None:
                             res.append({
-                                data_slice: int(i),
+                                data_slice: str(i),
                                 'variant1': 0.0,
                                 'variant2': 0.0,
                                 'deviation': 0.0,
