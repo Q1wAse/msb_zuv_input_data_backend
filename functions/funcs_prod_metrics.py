@@ -211,6 +211,30 @@ def convert_data_to_tab_front_old(result, key_name, reverse_diff=False):
         #==============================================================
     return final_res
 #=======================================================================================================================
+def get_list_percent_from_lists(list_base,list_slice):
+    result = []
+    if list_base and list_slice and len(list_base) == len(list_slice):
+        for i in range(0, len(list_base)):
+            con1 = (list_base[i].get('month', None) != None and
+                    list_base[i].get('variant1', None) != None and
+                    list_base[i].get('variant2', None) != None )
+            con2 = (list_slice[i].get('month', None) != None and
+                    list_slice[i].get('variant1', None) != None and
+                    list_slice[i].get('variant2', None) != None)
+            if con1 and con2:
+                v1_val1 = list_base[i].get('variant1', 0.0)
+                v1_val2 = list_slice[i].get('variant1', 0.0)
+                v2_val1 = list_base[i].get('variant2', 0.0)
+                v2_val2 = list_slice[i].get('variant2', 0.0)
+                v1_prc = round( v1_val2 / v1_val1,2) if v1_val1 != 0 else 0.0
+                v2_prc = round( v2_val2 / v2_val1,2) if v2_val1 != 0 else 0.0
+                result.append({
+                    'month' : list_base[i].get('month', 0),
+                    'variant1' : v1_prc,
+                    'variant2' : v2_prc
+                })
+    return result
+#=======================================================================================================================
 def convert_data_to_tab_front(result, key_name, reverse_diff=False):
     db = uf.get_db_connection()
     final_res = []
@@ -296,7 +320,6 @@ def get_calc_volume(
         selected_variant_compare,
         selected_factories,
         variant_columns,
-        sum=False,
         reverse_diff=False
 ):
     mapping_col = {
@@ -407,155 +430,99 @@ def get_calc_volume(
         res = []
 
         if result:
-            if sum:
-                v1_sum = 0.0
-                v2_sum = 0.0
-                for row in result:
-                    mapping = row._mapping
-                    v1_val = round(float(row.variant1),2)
-                    v2_val = round(float(row.variant2),2)
-                    v1_sum += v1_val
-                    v2_sum += v2_val
-                    if reverse_diff:
-                        diff_value = round(v2_val - v1_val, 2)
-                        base_val = v2_val
-                    else:
-                        diff_value = round(v1_val - v2_val, 2)
-                        base_val = v1_val
-                    res.append({
-                        data_slice : mapping.get(data_slice, None),
-                        'variant1' : v1_val,
-                        'variant2' : v2_val,
-                        'deviation' : diff_value,
-                        'percent' : round((diff_value / base_val) * 100, 2) if base_val != 0 else 0.0,
-                    })
+            for row in result:
+                mapping = row._mapping
+                v1_val = round(float(row.variant1),2)
+                v2_val = round(float(row.variant2),2)
                 if reverse_diff:
-                    diff_value = round(v2_sum - v1_sum, 2)
-                    base_val = v2_sum
+                    diff_value = round(v2_val - v1_val, 2)
+                    base_val = v2_val
                 else:
-                    diff_value = round(v1_sum - v2_sum, 2)
-                    base_val = v1_sum
+                    diff_value = round(v1_val - v2_val, 2)
+                    base_val = v1_val
                 res.append({
-                    'sum' : True,
-                    data_slice: mapping.get(data_slice, None),
-                    'variant1': v1_sum,
-                    'variant2': v2_sum,
-                    'deviation': diff_value,
-                    'percent': round((diff_value / base_val) * 100, 2) if base_val != 0 else 0.0,
+                    data_slice : mapping.get(data_slice, None),
+                    'variant1' : v1_val,
+                    'variant2' : v2_val,
+                    'deviation' : diff_value,
+                    'percent' : round((diff_value / base_val) * 100, 2) if base_val != 0 else 0.0,
                 })
-            else:
-                for row in result:
-                    mapping = row._mapping
-                    v1_val = round(float(row.variant1),2)
-                    v2_val = round(float(row.variant2),2)
-                    if reverse_diff:
-                        diff_value = round(v2_val - v1_val, 2)
-                        base_val = v2_val
-                    else:
-                        diff_value = round(v1_val - v2_val, 2)
-                        base_val = v1_val
-                    res.append({
-                        data_slice : mapping.get(data_slice, None),
-                        'variant1' : v1_val,
-                        'variant2' : v2_val,
-                        'deviation' : diff_value,
-                        'percent' : round((diff_value / base_val) * 100, 2) if base_val != 0 else 0.0,
-                    })
-
-        # Расчёт для запроса с распределением в столбец
-        # for row in result:
-        #     mapping = row._mapping
-        #     new_row = {
-        #         'variantColumns': row.variantcolumns
-        #     }
-        #     if data_slice in mapping:
-        #         new_row[data_slice] = mapping[data_slice]
-        #
-        #     # Безопасное приведение Decimal в округлённый float, если sum равен None, ставим 0.00
-        #     new_row['value'] = round(float(row.sum),2) if row.sum is not None else 0.00
-        #     res.append(new_row)
-        #
-        # slices = {}
-        # for row in res:
-        #     slice_key = row.get(data_slice, "all")
-        #     if slice_key not in slices:
-        #         slices[slice_key] = {}
-        #     slices[slice_key][row['variantColumns']] = row['value']
-        #
-        # diff_rows = []
-        # for slice_key, variants in slices.items():
-        #     if 1 in variants and 2 in variants:
-        #         v1_val = variants[1]
-        #         v2_val = variants[2]
-        #
-        #         # Расчет абсолютной разницы (variantColumns == 0)
-        #         if reverse_diff:
-        #             diff_value = round(v2_val - v1_val, 2)
-        #             base_val = v2_val  # При реверсе базой становится Вариант 2
-        #         else:
-        #             diff_value = round(v1_val - v2_val, 2)
-        #             base_val = v1_val  # По умолчанию Вариант 1
-        #
-        #         diff_row = {
-        #             'variantColumns': 0,
-        #             'value': diff_value
-        #         }
-        #         if data_slice_str:
-        #             diff_row[data_slice] = slice_key
-        #         diff_rows.append(diff_row)
-        #
-        #         # Расчет отклонения в процентах (variantColumns == -1)
-        #         if base_val != 0:
-        #             pct_value = round((diff_value / base_val) * 100, 2)
-        #         else:
-        #             pct_value = 0.0
-        #
-        #         pct_row = {
-        #             'variantColumns': -1,
-        #             'value': pct_value
-        #         }
-        #         if data_slice_str:
-        #             pct_row[data_slice] = slice_key
-        #         diff_rows.append(pct_row)
-        #
-        # res.extend(diff_rows)
-        #
-        # # Для развёртки по месяцам наполняем нулями в месяцы, которые пустые и сортируем для фронта
-        # if data_slice == 'month':
-        #     collect_column_variant = {item.get('variantColumns') for item in res if 'variantColumns' in item}
-        #     for i in range(1, 13):
-        #         for col_var in collect_column_variant:
-        #             exists = any(item.get('variantColumns') == col_var and item.get('month') == i for item in res)
-        #             if not exists:
-        #                 res.append(
-        #                     {
-        #                         'variantColumns': col_var,
-        #                         'month': i,
-        #                         'value' : 0.00
-        #                     })
-        #     order_priority = {
-        #         1   : 0,
-        #         2   : 1,
-        #         0   : 2,
-        #         -1  : 3
-        #     }
-        #     # "-5" несуществующий ключ для метки некорректной сортировки
-        #     res.sort(key=lambda item: (order_priority.get(item['variantColumns'],-5), item['month']))
+            # Насыщаем коллекцию недостающими месяцами, если такие есть
+            if data_slice == 'month':
+                for i in range(1,13):
+                    for r in res:
+                        if r.get(data_slice, None) == None:
+                            res.append({
+                                data_slice: int(i),
+                                'variant1': 0.0,
+                                'variant2': 0.0,
+                                'deviation': 0.0,
+                                'percent': 0.0,
+                            })
 
         return res
     else:
         return []
 #=======================================================================================================================
+def get_exist_factories(tab_id):
+    db = uf.get_db_connection()
+    res = []
+    tab_name = ''
+    fields_list = []
+    as_name_factory = 'factory'
+    if tab_id:
+        tab_map = uf.TABLES_MAP.get(tab_id, None)
+        if tab_map:
+            tab_name = tab_map.get('tab_name', '')
+            tab_fields = tab_map.get('fields', '')
+            fields_list = [f.strip() for f in tab_fields.split(',')]
+            fields = ', '.join([f'{as_name_factory}.{f.strip()}' for f in tab_fields.split(',')])
+    if tab_name and fields_list and len(fields_list) == 2:
+        sql_text = text(f"""
+            SELECT
+                {fields}
+            FROM
+                tab_pererabotka_d816_4 as pererab
+            JOIN
+                {tab_name} as {as_name_factory}
+            ON
+                pererab.tab_factory_d816_4_ids =
+                {as_name_factory}.id
+            WHERE
+                pererab.tab_type_raspr_d816_4_ids IN (5,7)
+            GROUP BY
+                {fields}
+            ORDER BY 
+                {fields}
+        """)
+        result = db.execute(sql_text).fetchall()
+        if result:
+            for row in result:
+                new_row = {}
+                mapping = row._mapping
+                for f in fields_list:
+                    if mapping.get(f, None):
+                        new_row[f] = mapping[f]
+                if new_row:
+                    res.append(new_row)
+    return res
+#=======================================================================================================================
 def get_exist_factory_collect(factory_id):
     db = uf.get_db_connection()
     res = {}
-    fields_list =['type_raspr', 'product','sobstv','mest','post_zuv']
+    fields_src_list =['product','sobstv','mest','post_zuv']
+    fields_list = [item for field in fields_src_list for item in (f'{field}_id', f'{field}_name')]
+    fields_list.insert(0,'type_raspr')
     fields_str = """
         pererab.tab_type_raspr_d816_4_ids as {},
-        pererab.tab_product_d816_4_ids as {},
-        pererab.tab_sobstv_d816_4_ids as {},
-        pererab.tab_mest_d816_4_ids as {},
-        pererab.tab_post_zuv_d816_4_ids as {}
+        product.id as {},
+        product.name as {},
+        sobstv.id as {},
+        sobstv.name as {},
+        mest.id as {},
+        mest.name as {},
+        post_zuv.id as {},
+        post_zuv.name as {}
     """
     fields_clr_str = fields_str.replace(' as {}','')
     fields_str = fields_str.format(*fields_list)
@@ -565,11 +532,11 @@ def get_exist_factory_collect(factory_id):
             {fields_str}
         FROM
             tab_pererabotka_d816_4 as pererab
-        JOIN
-            tab_factory_d816_4 as factory
-        ON
-            pererab.tab_factory_d816_4_ids =
-            factory.id
+        LEFT JOIN tab_factory_d816_4 as factory ON pererab.tab_factory_d816_4_ids = factory.id
+        LEFT JOIN tab_view_product_d816_4 as product ON pererab.tab_product_d816_4_ids = product.id
+        LEFT JOIN tab_sobstv_d816_4 as sobstv ON pererab.tab_sobstv_d816_4_ids = sobstv.id
+        LEFT JOIN tab_mest_d816_4 as mest ON pererab.tab_mest_d816_4_ids = mest.id
+        LEFT JOIN tab_post_zuv_d816_4 as post_zuv ON pererab.tab_post_zuv_d816_4_ids = post_zuv.id
         WHERE
             pererab.tab_type_raspr_d816_4_ids IN (5,7) AND
             pererab.tab_factory_d816_4_ids = {int(factory_id)}
@@ -578,22 +545,54 @@ def get_exist_factory_collect(factory_id):
         ORDER BY 
             {fields_clr_str}
     """)
+
+    # sql_text = text(f"""
+    #     SELECT
+    #         {fields_str}
+    #     FROM
+    #         tab_pererabotka_d816_4 as pererab
+    #     JOIN
+    #         tab_factory_d816_4 as factory
+    #     ON
+    #         pererab.tab_factory_d816_4_ids =
+    #         factory.id
+    #     WHERE
+    #         pererab.tab_type_raspr_d816_4_ids IN (5,7) AND
+    #         pererab.tab_factory_d816_4_ids = {int(factory_id)}
+    #     GROUP BY
+    #         {fields_clr_str}
+    #     ORDER BY
+    #         {fields_clr_str}
+    # """)
     result = db.execute(sql_text).fetchall()
     if result:
         uniq_dict_frame1 = defaultdict(list)
         uniq_dict_frame2 = defaultdict(list)
         for row in result:
             mapping = row._mapping
-            for key, value in mapping.items():
-                if key != 'type_raspr':
-                    type_raspr = mapping.get('type_raspr', None)
-                    if type_raspr != None:
-                        if type_raspr == 5: # Переработка
-                            if uniq_dict_frame1.get(key, None) == None or value not in uniq_dict_frame1[key]:
-                                uniq_dict_frame1[key].append(value)
-                        elif type_raspr == 7: # Производство
-                            if uniq_dict_frame2.get(key, None) == None or value not in uniq_dict_frame2[key]:
-                                uniq_dict_frame2[key].append(value)
+            type_raspr = mapping.get('type_raspr', None)
+            row_data = defaultdict(dict)
+            for db_key, db_value in mapping.items():
+                if db_key != 'type_raspr':
+                    for src in fields_src_list:
+                        if src in db_key:
+                            suffix = db_key.rsplit('_', 1)[-1]
+
+                            if suffix == 'id':
+                                row_data[src]['id'] = db_value
+                            elif suffix == 'name':
+                                row_data[src]['name'] = db_value
+                            break
+
+            for src, item_dict in row_data.items():
+                if 'id' in item_dict and 'name' in item_dict and item_dict.get('id', 0) != 0:
+                    if type_raspr == 5: # Переработка
+                        if item_dict not in uniq_dict_frame1[src]:
+                            uniq_dict_frame1[src].append(item_dict)
+                    elif type_raspr == 7: # Производство
+                        if item_dict not in uniq_dict_frame2[src]:
+                            uniq_dict_frame2[src].append(item_dict)
+
         res = {
              'panel_middle_month_volume_frame1_filter' : uniq_dict_frame1,
              'panel_middle_month_volume_frame2_filter' : uniq_dict_frame2
@@ -664,15 +663,26 @@ def get_calculated_dataset(selected_variant_compare,
                 selected_variant_compare,
                 selected_factories,
                 variant_columns),
-            'panel_upper_month_volume_graph1': get_calc_volume(
-                'month',
-                [64],  # Газ
-                [5],  # Переработка
-                1,  # тыс тонн (Единица измерения)
-                {},
-                selected_variant_compare,
-                selected_factories,
-                variant_columns),
+            'panel_upper_month_volume_graph1': get_list_percent_from_lists(
+                get_calc_volume(
+                    'month',
+                    [],  #
+                    [5],  # Переработка
+                    1,  # тыс тонн (Единица измерения)
+                    {},
+                    selected_variant_compare,
+                    selected_factories,
+                    variant_columns),
+                get_calc_volume(
+                    'month',
+                    [64],  # Газ
+                    [5],  # Переработка
+                    1,  # тыс тонн (Единица измерения)
+                    {},
+                    selected_variant_compare,
+                    selected_factories,
+                    variant_columns)
+            ),
             'panel_middle_month_volume_frame1': get_calc_volume(
                 'month',
                 [],  #
@@ -714,45 +724,3 @@ def get_calculated_dataset(selected_variant_compare,
             collection.update(get_exist_factory_collect(selected_factories[0]))
     return collection
 #=======================================================================================================================
-def get_exist_factories(tab_id):
-    db = uf.get_db_connection()
-    res = []
-    tab_name = ''
-    fields_list = []
-    as_name_factory = 'factory'
-    if tab_id:
-        tab_map = uf.TABLES_MAP.get(tab_id, None)
-        if tab_map:
-            tab_name = tab_map.get('tab_name', '')
-            tab_fields = tab_map.get('fields', '')
-            fields_list = [f.strip() for f in tab_fields.split(',')]
-            fields = ', '.join([f'{as_name_factory}.{f.strip()}' for f in tab_fields.split(',')])
-    if tab_name and fields_list and len(fields_list) == 2:
-        sql_text = text(f"""
-            SELECT
-                {fields}
-            FROM
-                tab_pererabotka_d816_4 as pererab
-            JOIN
-                {tab_name} as {as_name_factory}
-            ON
-                pererab.tab_factory_d816_4_ids =
-                {as_name_factory}.id
-            WHERE
-                pererab.tab_type_raspr_d816_4_ids IN (5,7)
-            GROUP BY
-                {fields}
-            ORDER BY 
-                {fields}
-        """)
-        result = db.execute(sql_text).fetchall()
-        if result:
-            for row in result:
-                new_row = {}
-                mapping = row._mapping
-                for f in fields_list:
-                    if mapping.get(f, None):
-                        new_row[f] = mapping[f]
-                if new_row:
-                    res.append(new_row)
-    return res

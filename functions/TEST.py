@@ -98,15 +98,7 @@ def test_formula(formula):
 # for i, formula in enumerate(formulas):
 #     test_formula(formula)
 
-fields_list =['id','name','product','sobstv','mest','post_zuv']
-fields_str = """
-    factory.id as {},
-    factory.id as {},
-    pererab.tab_product_d816_4_ids as {},
-    pererab.tab_sobstv_d816_4_ids as {},
-    pererab.tab_mest_d816_4_ids as {},
-    pererab.tab_post_zuv_d816_4_ids as {}
-"""
+fields_src_list =['product','sobstv','mest','post_zuv']
+fields_non_zero_con_str = '(' + '.id != 0 OR '.join(fields_src_list) + '.id != 0) AND'
 
-new_str = fields_str.format(*fields_list)
-print(new_str)
+print(fields_non_zero_con_str)
