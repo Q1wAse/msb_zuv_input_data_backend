@@ -506,3 +506,14 @@ def get_struct_table(key_tab):
         loc_log_new(sys._getframe(0).f_code.co_name, locals(), e)
         abort(msg_list[EnumMsg.SYSTEM_ERROR].get('code'),
               description=get_msg_struct(EnumMsg.SYSTEM_ERROR)[0]['message'])
+# ============================================================================================
+def get_last_update():
+    db = get_db_connection()
+    tab_name = 'tab_log_load_data_d816_4'
+    inspector = inspect(db.get_bind())
+    if inspector and inspector.has_table(tab_name):
+        result = db.execute(text(f'select max(date) from {tab_name}')).fetchall()
+        if result and len(result) == 1:
+            return result[0][0].strftime('%d.%m.%Y %H:%M:%S')
+    return "01.01.1990 00:00:00"
+#=======================================================================================================================
