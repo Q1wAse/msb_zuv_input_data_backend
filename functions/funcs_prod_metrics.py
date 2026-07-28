@@ -1,4 +1,5 @@
 from collections import defaultdict
+import datetime
 
 from sqlalchemy import text, inspect
 
@@ -724,4 +725,14 @@ def get_calculated_dataset(selected_variant_compare,
         if len(selected_factories) == 1:
             collection.update(get_exist_factory_collect(selected_factories[0]))
     return collection
+#=======================================================================================================================
+def get_last_update():
+    db = uf.get_db_connection()
+    tab_name = 'tab_log_load_data_d816_4'
+    inspector = inspect(db.get_bind())
+    if inspector and inspector.has_table(tab_name):
+        result = db.execute(text(f'select max(date) from {tab_name}')).fetchall()
+        if result and len(result) == 1:
+            return result[0][0].strftime('%d.%m.%Y %H:%M:%S')
+    return "01.01.1990 00:00:00"
 #=======================================================================================================================
