@@ -149,21 +149,29 @@ class ClsStructDataDownloadReport(Resource):
 
             total : dict
 
-            versions  = uf.get_pagin_data('var_plan', '', 1, 100)
+            variants = uf.get_pagin_data('var_plan', '', 1, 100)
+            version = uf.get_pagin_data('vers_plan', '', 1, 100)
 
             grouped = {}
-            for item in versions:
+            for item in variants:
                 v_id = item["tab_vers_plan_ids"]
+
+                if v_id == 0:
+                    continue
 
                 if v_id not in grouped:
                     grouped[v_id] = {
-                        "version": v_id,
+                        "version": {
+                            'id': v_id,
+                            'name': next((item for item in version if item.get('id') == v_id), {}).get('name', ''),
+                        },
                         "variants": []
                     }
 
                 grouped[v_id]["variants"].append({
                     "tab_vers_plan_ids": item["id"],
-                    "name": item["name"]
+                    "name": item["name"],
+                    "utv": 0
                 })
 
             total = {

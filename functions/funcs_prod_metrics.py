@@ -229,8 +229,8 @@ def get_list_percent_from_lists(list_base,list_slice):
                 v2_val2 = list_slice[i].get('variant2', 0.0)
                 result.append({
                     'month' : list_base[i].get('month', 0),
-                    'variant1' : round( v1_val2 / v1_val1,2) * 100 if v1_val1 != 0 else 0.0,
-                    'variant2' : round( v2_val2 / v2_val1,2) * 100 if v2_val1 != 0 else 0.0
+                    'variant1' : round( v1_val2 / v1_val1 * 100, 2)  if v1_val1 != 0 else 0.0,
+                    'variant2' : round( v2_val2 / v2_val1 * 100, 2)  if v2_val1 != 0 else 0.0
                 })
     return result
 #=======================================================================================================================
@@ -271,10 +271,10 @@ def convert_data_to_tab_front(result, key_name, reverse_diff=False):
             final_res.append({
                 # 'name' : key_name_list.get(res.get(key_name, ''), ''),
                 'name' : next((item for item in key_name_list if item.get('id') == res.get(key_name, '')), {}).get('name', ''),
-                'variant1': res.get('variant1', 0.0),
-                'variant2': res.get('variant2', 0.0),
-                'deviation': res.get('deviation', 0.0),
-                'percents': res.get('percents', 0.0),
+                'variant1' : res.get('variant1', 0.0),
+                'variant2' : res.get('variant2', 0.0),
+                'deviation' : res.get('deviation', 0.0),
+                'percents' : res.get('percents', 0.0),
             })
 
         dict_total = {
@@ -447,21 +447,21 @@ def get_calc_volume(
                     'variant1' : v1_val,
                     'variant2' : v2_val,
                     'deviation' : diff_value,
-                    'percent' : round((diff_value / base_val) * 100, 2) if base_val != 0 else 0.0,
+                    'percents' : round((diff_value / base_val) * 100, 2) if base_val != 0 else 0.0,
                 })
             # Насыщаем коллекцию недостающими месяцами, если такие есть
             if data_slice == 'month':
-                for i in range(1,13):
-                    for r in res:
-                        if r.get(data_slice, None) == None:
-                            res.append({
-                                data_slice: str(i),
-                                'variant1': 0.0,
-                                'variant2': 0.0,
-                                'deviation': 0.0,
-                                'percent': 0.0,
-                            })
-
+                for i in range(0,12):
+                    try:
+                        cur_month = res[i].get(data_slice)
+                    except IndexError:
+                        res.append({
+                            data_slice: str(i+1),
+                            'variant1': 0.0,
+                            'variant2': 0.0,
+                            'deviation': 0.0,
+                            'percents': 0.0,
+                        })
         return res
     else:
         return []
