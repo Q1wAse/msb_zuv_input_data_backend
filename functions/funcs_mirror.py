@@ -420,8 +420,10 @@ def main_download_report(download_type, selected_factories, selected_reports, sr
         return uf.get_msg_struct(uf.EnumMsg.SETTINGS_FOR_REPORT_NOT_FOUND)
 
     generating_type = {
-        'NeedGeneratingReport' : bool(selected_factories or (any(item in selected_reports for item in ['1','2']))),
-        'NeedStaticReport' : any(item in selected_reports for item in ['3']),
+        'NeedGeneratingReport' : bool(selected_factories or (any(item in selected_reports for item in
+                                    ['1','2','3','5']
+                                ))),
+        'NeedStaticReport' : any(item in selected_reports for item in ['4']),
     }
 
     if len_src_columns > 1:
@@ -1315,61 +1317,6 @@ def main_download_report(download_type, selected_factories, selected_reports, sr
             pj = [p[2] for p in params_list]
             bs = [p[3] for p in params_list]
 
-            # query_sql = text(f"""
-            #     SELECT
-            #         f.index_do as index,
-            #         t.calyear as year,
-            #         t.BCBIM0002::INT as do,
-            #         t.data_type,
-            #         t.pj,
-            #         t.bs,
-            #         sum(t.sum)
-            #     FROM tab_integ_get_preu_mirror_d816_4 as t
-            #     JOIN unnest(
-            #                 CAST(:index_do AS INTEGER[]),   -- [Набор] Индекс do
-            #                 CAST(:do AS INTEGER[]),         -- [Набор] Завод
-            #                 CAST(:pj AS INTEGER[]),         -- [Набор] Перерабатывающий комплекс (Поставщики ЖУВ)
-            #                 CAST(:bs AS INTEGER[])          -- [Набор] Бюджетная статья
-            #                 ) AS f(index_do, req_do, req_pj, req_bs)
-            #       ON t.BCBIM0002::INT = f.req_do
-            #      AND t.pj::INT = f.req_pj
-            #      AND t.bs::INT = f.req_bs
-            #     WHERE
-            #         t.calmonth <> 0 AND
-            #         (
-            #             t.calyear,          -- Год
-            #             t.BCBLM0001::INT,	-- Версия планирования
-            #             t.BCBLM0002::INT,	-- Вариант планирования
-            #             t.data_type::INT	-- Тип данных
-            #         ) IN (VALUES
-            #
-            #                         ({collect_struct_columns['1']['dateRange'][0][-4:]},
-            #                         {collect_struct_columns['1']['versionPlaning']},
-            #                         {collect_struct_columns['1']['variantPlaning']},
-            #                         1),
-            #
-            #                         ({collect_struct_columns['15']['dateRange'][0][-4:]},
-            #                         0,
-            #                         0,
-            #                         15)
-            #         ) AND
-            #         t.dbs = 0
-            #     GROUP BY
-            #         f.index_do,
-            #         t.calyear,
-            #         t.BCBIM0002,
-            #         t.data_type,
-            #         t.pj,
-            #         t.bs
-            #     ORDER BY
-            #         f.index_do,
-            #         t.calyear,
-            #         t.BCBIM0002,
-            #         t.data_type,
-            #         t.pj,
-            #         t.bs
-            # """)
-
             query_sql = text(f"""
                 SELECT
                     p.req_year AS year,
@@ -1479,15 +1426,29 @@ def main_download_report(download_type, selected_factories, selected_reports, sr
 
 
     if generating_type.get('NeedGeneratingReport', False):
+        generating_report_settings = {
+        # ключ в "Таблица Типы отчётов" | index - индекс именованного диапазона
+            '1': {'index': '1'}, # План общий
+            '2': {'index': ''}, # Факт общий
+            '3': {'index': '2'}, # Баланс ЗС
+            '5': {'index': '3'}, # ЕЖО
+        }
+        reports_all_list = list(generating_report_settings.keys())
+        selected_index_report = [
+            generating_report_settings[report_id]['index']
+            for report_id in selected_reports
+            if report_id in generating_report_settings
+        ]
+
         init_some_data_generating_report('type_factory', selected_factories, factories_all, ['_SET_ROW', '_INTERNAL_KEY'])
-        init_some_data_generating_report('type_summary_rep', selected_reports, reports_all, ['_SUM_REP_SET_ROW', '_SUM_REP_INTERNAL_KEY'])
+        init_some_data_generating_report('type_summary_rep', selected_index_report, reports_all_list, ['_SUM_REP_SET_ROW', '_SUM_REP_INTERNAL_KEY'])
 
         prepare_and_fill_data_generating_report('type_factory', selected_factories, ['_SET_ROW', '_INTERNAL_KEY'])
-        prepare_and_fill_data_generating_report('type_summary_rep', selected_reports, ['_SUM_REP_SET_ROW', '_SUM_REP_INTERNAL_KEY'])
+        prepare_and_fill_data_generating_report('type_summary_rep', selected_index_report, ['_SUM_REP_SET_ROW', '_SUM_REP_INTERNAL_KEY'])
 
     if generating_type.get('NeedStaticReport', False):
         static_report_settings = {
-            '3' : { # Отчёт КПД ДО
+            '4' : { # Отчёт КПД ДО
                 'SET_ROW' : '_STATIC_REP_SET_ROW1',
                 'INTERNAL_KEY' : '_STATIC_REP_INTERNAL_KEY1',
             }

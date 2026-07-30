@@ -176,7 +176,7 @@ class ClsStructDataDownloadReport(Resource):
 
             total = {
                 'factories': uf.get_pagin_data('factories', '', 1, 100),
-                'type_reports': uf.get_pagin_data('type_reports', '', 1, 100),
+                'type_reports': uf.sort_list_by_field(uf.get_pagin_data('type_reports', '', 1, 100)),
                 'data_type': uf.get_pagin_data('data_type', '', 1, 100),
                 'versions': list(grouped.values()),
                 'last_update': uf.get_last_update(),

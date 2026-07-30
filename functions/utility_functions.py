@@ -321,6 +321,9 @@ def get_pagin_data_old(v_tab_id, v_filter, v_page, v_limit):
 #############################################################################################
 #############################################################################################
 # ============================================================================================
+def sort_list_by_field(list,field='id'):
+    list = sorted( list, key=lambda x: x.get(field, float('inf')))
+    return list
 def get_pagin_data(v_tab_id, v_filter, v_page, v_limit):
     db = get_db_connection()
     offset = max(0, (v_page - 1) * v_limit)
