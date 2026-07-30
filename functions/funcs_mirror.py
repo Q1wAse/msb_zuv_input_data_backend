@@ -234,6 +234,34 @@ def download_report(year, template_name):
 
 # ============================================================================================
 # ============================================================================================
+def get_hard_mirror_pattern():
+    return r'(?P<CELL_OFFSET>\{[^}]+\})' \
+                r'|(?P<ESCAPED>\$[0-9]+)' \
+                r'|(?P<FUNC_OR_VAR>[a-zA-Zа-яА-ЯёЁ0-9_]+)' \
+                r'|(?P<OPERATOR>[;(),+\-*/:])' \
+                r'|(?P<NUMBER>[0-9]+)'
+def get_data_from_named_range(wb,name):
+    named_range = None
+    sheet = None
+    min_col, min_row, max_col, max_row = 0, 0, 0, 0
+    sheet_name = ''
+    try:
+        named_range = wb.defined_names[name]
+        for sheet_name, cell_coordinates in named_range.destinations:
+            min_col, min_row, max_col, max_row = range_boundaries(cell_coordinates)
+        if sheet_name in wb.sheetnames:
+            sheet = wb[sheet_name]
+    except Exception as e:
+        return { 'Exec' : False }
+    return {
+        'Exec'          : True,
+        'sheet_name'    : sheet_name,
+        'sheet'         : sheet,
+        'min_col'       : min_col,
+        'min_row'       : min_row,
+        'max_col'       : max_col,
+        'max_row'       : max_row
+    }
 def set_value_cell(cell, value, ColumnType: EnumCellType = EnumCellType.INPUT):
     global G_STYLE_FONT_SIMPLE, \
         G_STYLE_FONT_FORMULA, \
@@ -376,75 +404,6 @@ def main_download_report(download_type, selected_factories, selected_reports, sr
     }
     # ==================================================================================================================
     len_src_columns = len(src_columns)
-    columns = []
-
-    for i, column in enumerate(src_columns):
-        loc_column = copy.deepcopy(column)
-        loc_column['ColumnType'] = 'Selected'
-        loc_column['SrcKey'] = i
-        columns.append(loc_column)
-        columns.append({
-            'ColumnType': 'PercentOfOutput',
-            'ColumnName': '% выхода',
-            'IsStartGroup': True,
-            'MergeCount': 1,
-            'GroupName': '% выхода',
-            'FormulaLink': {
-                'Formula': '=ОКРУГЛ({}/{}*100;6)',
-                'total': 2,
-                'col1': {
-                    'Letter': '',
-                    'index': 0
-                },
-                'col2': {
-                    'Letter': '',
-                    'index': 0
-                }
-            }
-            # 'ptr': columns[1]
-        })
-    if len_src_columns > 1:
-        columns.append({
-            'ColumnType': 'SecondMinusFirst',
-            'ColumnName': '+ / -',
-            'IsStartGroup': True,
-            'GroupName': 'Отклонение',
-            'FormulaLink': {
-                'Formula': '=ЕСЛИОШИБКА({}-{};"-")',
-                'total': 2,
-                'col1': {
-                    'Letter': '',
-                    'index': 1
-                },
-                'col2': {
-                    'Letter': '',
-                    'index': 0
-                }
-            }
-            # 'ptr': columns[0]
-        })
-        columns.append({
-            'ColumnType': 'PercentOfComplete',
-            'ColumnName': '% вып.',
-            'IsStartGroup': False,
-            'GroupName': 'Отклонение',
-            'FormulaLink': {
-                'Formula': '=ЕСЛИОШИБКА({}/{};"-")',
-                'total': 2,
-                'col1': {
-                    'Letter': '',
-                    'index': 1
-                },
-                'col2': {
-                    'Letter': '',
-                    'index': 0
-                }
-            }
-            # 'ptr': columns[0]
-        })
-    for column in columns:
-        if column.get('ColumnType', '') != 'Selected':
-            column['SrcKey'] = -1
     # ==================================================================================================================
     offset_ind_col = 1
     factories_all = [str(row.id) for row in uf.get_data_from_query("SELECT id FROM tab_factories_d816_4")]
@@ -460,49 +419,27 @@ def main_download_report(download_type, selected_factories, selected_reports, sr
     if not settings:
         return uf.get_msg_struct(uf.EnumMsg.SETTINGS_FOR_REPORT_NOT_FOUND)
 
-    composite_keys_do_pj = [(row.DO, row.pj) for row in settings]
+    generating_type = {
+        'NeedGeneratingReport' : bool(selected_factories or (any(item in selected_reports for item in ['1','2']))),
+        'NeedStaticReport' : any(item in selected_reports for item in ['3']),
+    }
 
-    # bs_calc_mapping = get_data_from_query(
-    #     """
-    #                 SELECT "DO", pj, bs, calc FROM tab_bs_calc_map_d816_4 WHERE ("DO",pj) IN :composite_keys
-    #             """,
-    #     {"composite_keys": tuple(composite_keys_do_pj)})
-
-    temp_data = {}
-    for col in columns:
-        if 'typeData' in col:
-            type_id = int(col['typeData'])
-
-            if type_id == 1:
-                if type_id not in temp_data:
-                    temp_data[type_id] = []
-
-                temp_data[type_id].append({'variant_planing': col.get('variantPlaning')})
-
-            else:
-                temp_data[type_id] = {'simple': True}
-
-    columns_collect = [{key: val} for key, val in temp_data.items()]
-
-    columns_text = []
-    # for collect in columns_collect:
-    for item in columns_collect:
-        for type_id, collect in item.items():
-            if type_id == 1:
-                variants = [item['variant_planing'] for item in collect]
-
-                query_res = uf.get_data_from_query(
-                    'SELECT id, name FROM tab_view_var_plan_d816_4 WHERE id IN :variant_ids',
-                    {'variant_ids': tuple(variants)})
-                for row in query_res:
-                    columns_text.append({'typeData': type_id, 'id': row.id, 'name': row.name})
-
-            elif type_id == 15:
-                query_res = uf.get_data_from_query(
-                    'SELECT id, name FROM tab_view_io_bcblm0003_d816_4 WHERE id = :type_id',
-                    {'type_id': type_id})
-                for row in query_res:
-                    columns_text.append({'typeData': type_id, 'id': row.id, 'name': row.name})
+    if len_src_columns > 1:
+        have_plan = 0
+        have_fact = 0
+        for col in src_columns:
+            type_data = col.get('typeData', None)
+            # План
+            if type_data == '1':
+                have_plan = 1
+            # Факт
+            if type_data == '15':
+                have_fact = 1
+        # Проверяем, что в списке выбранного среза есть факт и план
+        if have_fact + have_plan != 2:
+            generating_type['NeedStaticReport'] = False
+    else:
+        generating_type['NeedStaticReport'] = False
 
     def get_txt_col(column):
         if 'ColumnType' in column:
@@ -581,7 +518,7 @@ def main_download_report(download_type, selected_factories, selected_reports, sr
     # Создаём буфер для наполнения
     buffer = io.BytesIO()
 
-    # ===================================================================================================================
+    # ==================================================================================================================
     ws_tech = wb['tech']
     if ws_tech:
         G_STYLE_FONT_SIMPLE = extract_cell_styles(ws_tech['B2'])
@@ -611,51 +548,127 @@ def main_download_report(download_type, selected_factories, selected_reports, sr
             if 'B12' in cf.cells:
                 for rule in cf.rules:
                     G_STYLE_RULE_DASH_FOR_ZERO = rule
-    # ===================================================================================================================
-    count_columns = len(columns)
-
-    columns_layout = []
-    for index_column, column in enumerate(columns):
-        ColumnType = column.get('ColumnType')
-        if ColumnType == 'Selected':
-            simple_key = f"year{column.get('dateRange')[0][-4:]}"
-            columns_layout.append({
-                'Letter': '',
-                'ColumnType': ColumnType,
-                'SrcKey': column.get('SrcKey'),
-                'type': simple_key,
-                'data_type_col': index_column,
-                'IsNeedMerge': True if index_column == 0 else False,
-                'MergeCount': count_columns,
-                'col_name': get_txt_col(column),
-                'internal_key': get_internal_key(column, simple_key),
-                'period': column.get('dateRange')[0][-4:]
+    # ==================================================================================================================
+    columns = []
+    if generating_type.get('NeedGeneratingReport', False):
+        for i, column in enumerate(src_columns):
+            loc_column = copy.deepcopy(column)
+            loc_column['ColumnType'] = 'Selected'
+            loc_column['SrcKey'] = i
+            columns.append(loc_column)
+            columns.append({
+                'ColumnType': 'PercentOfOutput',
+                'ColumnName': '% выхода',
+                'IsStartGroup': True,
+                'MergeCount': 1,
+                'GroupName': '% выхода',
+                'FormulaLink': {
+                    'Formula': '=ОКРУГЛ({}/{}*100;6)',
+                    'total': 2,
+                    'col1': {
+                        'Letter': '',
+                        'index': 0
+                    },
+                    'col2': {
+                        'Letter': '',
+                        'index': 0
+                    }
+                }
+                # 'ptr': columns[1]
             })
-        elif ColumnType in ('SecondMinusFirst', 'PercentOfComplete', 'PercentOfOutput'):
-            # if 'ptr' in column:
-            #     col = column.get('ptr')
-            #     simple_key = f"year{col.get('dateRange')[0][-4:]}"
-            FormulaLink = copy.deepcopy(column.get('FormulaLink'))
-            columns_layout.append({
-                'Letter': '',
-                'ColumnType': ColumnType,
-                'SrcKey': column.get('SrcKey'),
-                'type': 'year',
-                'data_type_col': index_column,
-                'IsNeedMerge': column.get('IsStartGroup', False),
-                'MergeCount': get_count_merge_group(columns, column),
-                'col_name': get_txt_col(column),
-                'GroupName': column.get('GroupName', ''),
-                'internal_key': '',  # get_internal_key(column, simple_key),
-                'FormulaLink': FormulaLink,
-                'period': ''
+        if len_src_columns > 1:
+            columns.append({
+                'ColumnType': 'SecondMinusFirst',
+                'ColumnName': '+ / -',
+                'IsStartGroup': True,
+                'GroupName': 'Отклонение',
+                'FormulaLink': {
+                    'Formula': '=ЕСЛИОШИБКА({}-{};"-")',
+                    'total': 2,
+                    'col1': {
+                        'Letter': '',
+                        'index': 1
+                    },
+                    'col2': {
+                        'Letter': '',
+                        'index': 0
+                    }
+                }
+                # 'ptr': columns[0]
             })
+            columns.append({
+                'ColumnType': 'PercentOfComplete',
+                'ColumnName': '% вып.',
+                'IsStartGroup': False,
+                'GroupName': 'Отклонение',
+                'FormulaLink': {
+                    'Formula': '=ЕСЛИОШИБКА({}/{};"-")',
+                    'total': 2,
+                    'col1': {
+                        'Letter': '',
+                        'index': 1
+                    },
+                    'col2': {
+                        'Letter': '',
+                        'index': 0
+                    }
+                }
+                # 'ptr': columns[0]
+            })
+        for column in columns:
+            if column.get('ColumnType', '') != 'Selected':
+                column['SrcKey'] = -1
+        # ==============================================================================================================
+        # composite_keys_do_pj = [(row.DO, row.pj) for row in settings]
+        # bs_calc_mapping = get_data_from_query(
+        #     """
+        #                 SELECT "DO", pj, bs, calc FROM tab_bs_calc_map_d816_4 WHERE ("DO",pj) IN :composite_keys
+        #             """,
+        #     {"composite_keys": tuple(composite_keys_do_pj)})
+        # ==============================================================================================================
+        temp_data = {}
+        for col in columns:
+            if 'typeData' in col:
+                type_id = int(col['typeData'])
 
-    for q in range(1, 5):
+                if type_id == 1:
+                    if type_id not in temp_data:
+                        temp_data[type_id] = []
+
+                    temp_data[type_id].append({'variant_planing': col.get('variantPlaning')})
+
+                else:
+                    temp_data[type_id] = {'simple': True}
+
+        columns_collect = [{key: val} for key, val in temp_data.items()]
+
+        columns_text = []
+        # for collect in columns_collect:
+        for item in columns_collect:
+            for type_id, collect in item.items():
+                if type_id == 1:
+                    variants = [item['variant_planing'] for item in collect]
+
+                    query_res = uf.get_data_from_query(
+                        'SELECT id, name FROM tab_view_var_plan_d816_4 WHERE id IN :variant_ids',
+                        {'variant_ids': tuple(variants)})
+                    for row in query_res:
+                        columns_text.append({'typeData': type_id, 'id': row.id, 'name': row.name})
+
+                elif type_id == 15:
+                    query_res = uf.get_data_from_query(
+                        'SELECT id, name FROM tab_view_io_bcblm0003_d816_4 WHERE id = :type_id',
+                        {'type_id': type_id})
+                    for row in query_res:
+                        columns_text.append({'typeData': type_id, 'id': row.id, 'name': row.name})
+        # ==============================================================================================================
+        count_columns = len(columns)
+
+        columns_layout = []
         for index_column, column in enumerate(columns):
             ColumnType = column.get('ColumnType')
             if ColumnType == 'Selected':
-                simple_key = f"Q{q}"
+                simple_key = f"year{column.get('dateRange')[0][-4:]}"
                 columns_layout.append({
                     'Letter': '',
                     'ColumnType': ColumnType,
@@ -665,19 +678,19 @@ def main_download_report(download_type, selected_factories, selected_reports, sr
                     'IsNeedMerge': True if index_column == 0 else False,
                     'MergeCount': count_columns,
                     'col_name': get_txt_col(column),
-                    'internal_key': get_internal_key(column, f"year{column.get('dateRange')[0][-4:]}:{simple_key}"),
+                    'internal_key': get_internal_key(column, simple_key),
                     'period': column.get('dateRange')[0][-4:]
                 })
             elif ColumnType in ('SecondMinusFirst', 'PercentOfComplete', 'PercentOfOutput'):
                 # if 'ptr' in column:
                 #     col = column.get('ptr')
-                simple_key = f"Q{q}"
+                #     simple_key = f"year{col.get('dateRange')[0][-4:]}"
                 FormulaLink = copy.deepcopy(column.get('FormulaLink'))
                 columns_layout.append({
                     'Letter': '',
                     'ColumnType': ColumnType,
                     'SrcKey': column.get('SrcKey'),
-                    'type': simple_key,
+                    'type': 'year',
                     'data_type_col': index_column,
                     'IsNeedMerge': column.get('IsStartGroup', False),
                     'MergeCount': get_count_merge_group(columns, column),
@@ -687,11 +700,12 @@ def main_download_report(download_type, selected_factories, selected_reports, sr
                     'FormulaLink': FormulaLink,
                     'period': ''
                 })
-        for m in range(1, 4):
+
+        for q in range(1, 5):
             for index_column, column in enumerate(columns):
                 ColumnType = column.get('ColumnType')
                 if ColumnType == 'Selected':
-                    simple_key = f"M{q}_{m}"
+                    simple_key = f"Q{q}"
                     columns_layout.append({
                         'Letter': '',
                         'ColumnType': ColumnType,
@@ -701,14 +715,13 @@ def main_download_report(download_type, selected_factories, selected_reports, sr
                         'IsNeedMerge': True if index_column == 0 else False,
                         'MergeCount': count_columns,
                         'col_name': get_txt_col(column),
-                        'calmonth': (q - 1) * 3 + m,
                         'internal_key': get_internal_key(column, f"year{column.get('dateRange')[0][-4:]}:{simple_key}"),
                         'period': column.get('dateRange')[0][-4:]
                     })
                 elif ColumnType in ('SecondMinusFirst', 'PercentOfComplete', 'PercentOfOutput'):
                     # if 'ptr' in column:
                     #     col = column.get('ptr')
-                    simple_key = f"M{q}_{m}"
+                    simple_key = f"Q{q}"
                     FormulaLink = copy.deepcopy(column.get('FormulaLink'))
                     columns_layout.append({
                         'Letter': '',
@@ -724,8 +737,45 @@ def main_download_report(download_type, selected_factories, selected_reports, sr
                         'FormulaLink': FormulaLink,
                         'period': ''
                     })
+            for m in range(1, 4):
+                for index_column, column in enumerate(columns):
+                    ColumnType = column.get('ColumnType')
+                    if ColumnType == 'Selected':
+                        simple_key = f"M{q}_{m}"
+                        columns_layout.append({
+                            'Letter': '',
+                            'ColumnType': ColumnType,
+                            'SrcKey': column.get('SrcKey'),
+                            'type': simple_key,
+                            'data_type_col': index_column,
+                            'IsNeedMerge': True if index_column == 0 else False,
+                            'MergeCount': count_columns,
+                            'col_name': get_txt_col(column),
+                            'calmonth': (q - 1) * 3 + m,
+                            'internal_key': get_internal_key(column, f"year{column.get('dateRange')[0][-4:]}:{simple_key}"),
+                            'period': column.get('dateRange')[0][-4:]
+                        })
+                    elif ColumnType in ('SecondMinusFirst', 'PercentOfComplete', 'PercentOfOutput'):
+                        # if 'ptr' in column:
+                        #     col = column.get('ptr')
+                        simple_key = f"M{q}_{m}"
+                        FormulaLink = copy.deepcopy(column.get('FormulaLink'))
+                        columns_layout.append({
+                            'Letter': '',
+                            'ColumnType': ColumnType,
+                            'SrcKey': column.get('SrcKey'),
+                            'type': simple_key,
+                            'data_type_col': index_column,
+                            'IsNeedMerge': column.get('IsStartGroup', False),
+                            'MergeCount': get_count_merge_group(columns, column),
+                            'col_name': get_txt_col(column),
+                            'GroupName': column.get('GroupName', ''),
+                            'internal_key': '',  # get_internal_key(column, simple_key),
+                            'FormulaLink': FormulaLink,
+                            'period': ''
+                        })
 
-    # ===================================================================================================================
+    # ==================================================================================================================
     # Удаление неиспользуемых листов
     # if download_type == 'simple':
     #     sheets_to_keep = set()
@@ -751,9 +801,10 @@ def main_download_report(download_type, selected_factories, selected_reports, sr
     #     for sheet_name in wb.sheetnames:
     #         if sheet_name not in sheets_to_keep and sheet_name != 'tech':
     #             wb.remove(wb[sheet_name])
-    # ===================================================================================================================
+    # ==================================================================================================================
 
-    def init_some_data(type_sheet, sheet_ids, sheet_all, named_rng_names):
+    # [GENERATING] Инициализация работы для динамического построения отчёта
+    def init_some_data_generating_report(type_sheet, sheet_ids, sheet_all, named_rng_names):
         # _SET_ROW:
         #
         nonlocal storage_sheet
@@ -874,9 +925,9 @@ def main_download_report(download_type, selected_factories, selected_reports, sr
                 # {номер группы}:{индекс в группе}
                 #
                 # Пример:
-                # {0:0} {0:1} {0:2} {0:3} {0:4}
-                # {1:0} {1:1} {1:2} {1:3} {1:4}
-                # {2:0} {2:1} {2:2} {2:3} {2:4}
+                # группа 0 - {0:0} {0:1} {0:2} {0:3} {0:4}
+                # группа 1 - {1:0} {1:1} {1:2} {1:3} {1:4}
+                # группа 2 - {2:0} {2:1} {2:2} {2:3} {2:4}
                 # ...
                 #
                 # Итоговый объём может выглядеть так: {0-16:0-4} 17 групп из 5 элементов
@@ -911,7 +962,8 @@ def main_download_report(download_type, selected_factories, selected_reports, sr
                                 formula_col['Letter'] = storage_sheet[sheet_name_set_row]['src_key_column'] \
                                     [f'{idx // len_columns}:{formula_col["index"]}'].get('Letter')
 
-    def prepare_and_fill_data(type_sheet, sheet_ids, named_rng_names):
+    # [GENERATING] Подготовка и заполнение листов с динамическим построением отчёта
+    def prepare_and_fill_data_generating_report(type_sheet, sheet_ids, named_rng_names):
         nonlocal storage_sheet
 
         for sheet_id in sheet_ids:
@@ -1114,11 +1166,338 @@ def main_download_report(download_type, selected_factories, selected_reports, sr
                                struct_columns,
                                storage_sheet)
 
-    init_some_data('type_factory', selected_factories, factories_all, ['_SET_ROW', '_INTERNAL_KEY'])
-    init_some_data('type_summary_rep', selected_reports, reports_all, ['_SUM_REP_SET_ROW', '_SUM_REP_INTERNAL_KEY'])
+    # [STATIC] Инициализация работы для динамического построения отчёта
+    def init_some_data_static_report(selected_report, named_rng_names):
+        nonlocal storage_sheet
 
-    prepare_and_fill_data('type_factory', selected_factories, ['_SET_ROW', '_INTERNAL_KEY'])
-    prepare_and_fill_data('type_summary_rep', selected_reports, ['_SUM_REP_SET_ROW', '_SUM_REP_INTERNAL_KEY'])
+        #===============================================================================================================
+        #KIVA SET_ROW
+        named_rng_data = get_data_from_named_range(wb,named_rng_names.get('SET_ROW'))
+        if named_rng_data.get('Exec', False) == False:
+            return
+        sheet_name_set_row = named_rng_data.get('sheet_name')
+        set_row_left_col_index = named_rng_data.get('min_col')
+        set_row_right_col_index = named_rng_data.get('max_col')
+        sheet = named_rng_data.get('sheet')
+        # ===============================================================================================================
+        #KIVA INTERNAL_KEY
+        named_rng_data = get_data_from_named_range(wb, named_rng_names.get('INTERNAL_KEY'))
+        if named_rng_data.get('Exec', False) == False:
+            return
+        # ===============================================================================================================
+        sheet.sheet_state = 'visible'
+        required_conditions = set()
+
+        FirstRowData = named_rng_data.get('min_row')
+        first_row = FirstRowData - 3  # всего строк для заголовков 3
+        FirstRowData += 1
+
+        storage_sheet[sheet_name_set_row]['columns_layout'] = {
+            '1' : get_column_letter(set_row_right_col_index+3),
+            '15' : get_column_letter(set_row_right_col_index+6)
+        }
+        collect_struct_columns = {
+            '1'     : {
+                'filled' : False,
+                'versionPlaning' : 0,
+                'variantPlaning' : 0,
+                'dateRange' : [],
+            },
+            '15'    : {
+                'filled': False,
+                'dateRange': [],
+            }
+        }
+        for col in src_columns:
+            type_data = col.get('typeData')
+            if type_data == '1' and collect_struct_columns[type_data].get('filled', False) == False:
+                collect_struct_columns[type_data]['filled'] = True
+                collect_struct_columns[type_data]['versionPlaning'] = col.get('versionPlaning')
+                collect_struct_columns[type_data]['variantPlaning'] = col.get('variantPlaning')
+                collect_struct_columns[type_data]['dateRange'] = col.get('dateRange')
+            if type_data == '15':
+                collect_struct_columns[type_data]['filled'] = True
+                collect_struct_columns[type_data]['dateRange'] = col.get('dateRange')
+        storage_sheet[sheet_name_set_row]['struct_columns'] = collect_struct_columns
+
+        storage_sheet[sheet_name_set_row]['columns_settings'] = {
+            EnumColumnSettings.FORMULA_MONTH: set_row_left_col_index + 0,
+        }
+
+        storage_sheet[sheet_name_set_row]['SET_ROW_LIST'] = {}
+        storage_sheet[sheet_name_set_row]['SET_ROW_IDX'] = {}
+        storage_sheet[sheet_name_set_row]['required_conditions'] = required_conditions
+        storage_sheet[sheet_name_set_row]['collect_bs'] = []
+
+        for key, idx_col in storage_sheet[sheet_name_set_row]['columns_settings'].items():
+            if key not in storage_sheet[sheet_name_set_row]['SET_ROW_LIST']:
+                storage_sheet[sheet_name_set_row]['SET_ROW_LIST'][key] = []
+
+        loc_index_offset = set_row_right_col_index + 1 + offset_ind_col
+        last_row = sheet.max_row
+
+
+        for i in range(1, last_row + 1):
+            if i >= FirstRowData:
+                for key, idx_col in storage_sheet[sheet_name_set_row]['columns_settings'].items():
+                    cell_value = sheet.cell(row=i, column=idx_col).value
+                    if cell_value is not None:
+                        cell_value = str(cell_value)
+                        storage_sheet[sheet_name_set_row]['SET_ROW_LIST'][key].append({
+                            i: cell_value
+                        })
+
+                        if i not in storage_sheet[sheet_name_set_row]['SET_ROW_IDX']:
+                            storage_sheet[sheet_name_set_row]['SET_ROW_IDX'][i] = {}
+                        storage_sheet[sheet_name_set_row]['SET_ROW_IDX'][i][key] = {
+                            'column': idx_col,
+                            'value': cell_value
+                        }
+
+                        # Нет необходимости проверять на большее значение, т.к. основной цикл идёт по строкам сверху вниз
+                        storage_sheet[sheet_name_set_row]['LastRowData'] = i
+                        if storage_sheet[sheet_name_set_row].get('FirstRowWithBS', '') == '':
+                            storage_sheet[sheet_name_set_row]['FirstRowWithBS'] = i
+
+                        if key == EnumColumnSettings.FORMULA_MONTH:
+                        #===============================================================================================
+                            new_value = '0'
+                            src_formula = ''
+                            pattern = re.compile(get_hard_mirror_pattern())
+                            formula = cell_value
+                            for match in pattern.finditer(formula):
+                                token_type = match.lastgroup
+                                value = match.group()
+                                new_value = '0'
+
+                                # Округл - Имя функции формулы-xls
+                                # 1000330001 - ключ статьи
+                                # 1_1000330001 - ключ статьи со ссылкой на лист
+                                if token_type == 'FUNC_OR_VAR':
+                                    end_index = match.end()
+                                    next_char = formula[end_index] if end_index < len(formula) else ''
+                                    # Проверяем, если попало имя функции, то просто передаём его дальше без обработки
+                                    if next_char == '(':
+                                        new_value = f'{value}'
+                                    elif re.match(r'^\$?[A-Za-z]{1,3}\$?\d+$', value):
+                                        # Пропускаем обработку формул-xls (A1+B2)
+                                        pass
+                                    else:
+                                        if '_' in value:
+                                            index, bs = value.split('_')
+                                            if index and bs:
+                                                index_do = int(index)
+                                                index = index_do - 1
+                                                do = settings[index]._mapping['DO']
+                                                pj = settings[index]._mapping['pj']
+                                                required_conditions.add((index_do, do, pj, int(bs)))
+                                        else:
+                                            # Нет логики обработки без ссылочной статьи (статья без номера завода)
+                                            pass
+                                # экранирование для $
+                                elif token_type == 'ESCAPED':
+                                    new_value = value.replace('$', '')
+
+                                # обычный элемент
+                                else:
+                                    new_value = value
+
+                            src_formula = f'{src_formula}{new_value}'
+                        #===============================================================================================
+        if required_conditions:
+            # Запрос на получение цифр
+            db = uf.get_db_connection()
+
+            # Разделяем параметры на 3 изолированных списка
+            params_list = list(required_conditions)
+            index_do = [p[0] for p in params_list]
+            do = [p[1] for p in params_list]
+            pj = [p[2] for p in params_list]
+            bs = [p[3] for p in params_list]
+
+            # query_sql = text(f"""
+            #     SELECT
+            #         f.index_do as index,
+            #         t.calyear as year,
+            #         t.BCBIM0002::INT as do,
+            #         t.data_type,
+            #         t.pj,
+            #         t.bs,
+            #         sum(t.sum)
+            #     FROM tab_integ_get_preu_mirror_d816_4 as t
+            #     JOIN unnest(
+            #                 CAST(:index_do AS INTEGER[]),   -- [Набор] Индекс do
+            #                 CAST(:do AS INTEGER[]),         -- [Набор] Завод
+            #                 CAST(:pj AS INTEGER[]),         -- [Набор] Перерабатывающий комплекс (Поставщики ЖУВ)
+            #                 CAST(:bs AS INTEGER[])          -- [Набор] Бюджетная статья
+            #                 ) AS f(index_do, req_do, req_pj, req_bs)
+            #       ON t.BCBIM0002::INT = f.req_do
+            #      AND t.pj::INT = f.req_pj
+            #      AND t.bs::INT = f.req_bs
+            #     WHERE
+            #         t.calmonth <> 0 AND
+            #         (
+            #             t.calyear,          -- Год
+            #             t.BCBLM0001::INT,	-- Версия планирования
+            #             t.BCBLM0002::INT,	-- Вариант планирования
+            #             t.data_type::INT	-- Тип данных
+            #         ) IN (VALUES
+            #
+            #                         ({collect_struct_columns['1']['dateRange'][0][-4:]},
+            #                         {collect_struct_columns['1']['versionPlaning']},
+            #                         {collect_struct_columns['1']['variantPlaning']},
+            #                         1),
+            #
+            #                         ({collect_struct_columns['15']['dateRange'][0][-4:]},
+            #                         0,
+            #                         0,
+            #                         15)
+            #         ) AND
+            #         t.dbs = 0
+            #     GROUP BY
+            #         f.index_do,
+            #         t.calyear,
+            #         t.BCBIM0002,
+            #         t.data_type,
+            #         t.pj,
+            #         t.bs
+            #     ORDER BY
+            #         f.index_do,
+            #         t.calyear,
+            #         t.BCBIM0002,
+            #         t.data_type,
+            #         t.pj,
+            #         t.bs
+            # """)
+
+            query_sql = text(f"""
+                SELECT
+                    p.req_year AS year,
+                    t.BCBLM0002::INT as var_planing, -- Вариант планирования
+                    p.req_data_type AS data_type,
+                    f.index_do AS index,
+                    f.req_do AS do,
+                    f.req_pj AS pj,
+                    f.req_bs AS bs,
+                    COALESCE(SUM(t.sum), 0) AS sum
+                FROM
+                unnest(
+                        CAST(:index_do AS INTEGER[]),   -- [Набор] Индекс do
+                        CAST(:do AS INTEGER[]),         -- [Набор] Завод
+                        CAST(:pj AS INTEGER[]),         -- [Набор] Перерабатывающий комплекс (Поставщики ЖУВ)
+                        CAST(:bs AS INTEGER[])          -- [Набор] Бюджетная статья
+                            )AS f(index_do, req_do, req_pj, req_bs)
+                CROSS JOIN 
+                    (VALUES
+                        ({collect_struct_columns['1']['dateRange'][0][-4:]},
+                        {collect_struct_columns['1']['versionPlaning']},
+                        {collect_struct_columns['1']['variantPlaning']},
+                        1),
+                        
+                        ({collect_struct_columns['15']['dateRange'][0][-4:]},
+                        0,
+                        0,
+                        15)
+                    ) AS p(req_year, req_ver_planing, req_var_planing, req_data_type)
+                
+                LEFT JOIN 
+                    tab_integ_get_preu_mirror_d816_4 AS t
+                    ON  t.BCBIM0002::INT = f.req_do 
+                    AND t.pj::INT        = f.req_pj 
+                    AND t.bs::INT        = f.req_bs
+                    AND t.calyear        = p.req_year
+                    AND t.BCBLM0001::INT = p.req_ver_planing
+                    AND t.BCBLM0002::INT = p.req_var_planing
+                    AND t.data_type::INT = p.req_data_type
+                    AND t.dbs = 0 
+                    AND t.calmonth <> 0
+                GROUP BY
+                    p.req_year,
+                    t.BCBLM0002,
+                    p.req_data_type,
+                    f.index_do,
+                    f.req_do,
+                    f.req_pj,
+                    f.req_bs
+                ORDER BY
+                    year,
+                    data_type,
+                    index,
+                    BCBLM0002,
+                    pj,
+                    bs
+            """)
+            result = db.execute(query_sql, {
+                'index_do': index_do,
+                'do' : do,
+                'pj' : pj,
+                'bs' : bs,
+            }).fetchall()
+            if result:
+                storage_sheet[sheet_name_set_row]['collect_bs'] = res = [row._asdict() for row in result]
+
+
+    # [STATIC] Подготовка и заполнение листов с динамическим построением отчёта
+    def prepare_and_fill_data_static_report(selected_report, named_rng_names):
+        nonlocal storage_sheet
+
+        # ==============================================================================================================
+        # KIVA SET_ROW
+        named_rng_data = get_data_from_named_range(wb, named_rng_names.get('SET_ROW'))
+        if named_rng_data.get('Exec', False) == False:
+            return
+        sheet_name = named_rng_data.get('sheet_name')
+        set_row_left_col_index = named_rng_data.get('min_col')
+        set_row_right_col_index = named_rng_data.get('max_col')
+        sheet = named_rng_data.get('sheet')
+        # ==============================================================================================================
+        # KIVA INTERNAL_KEY
+        named_rng_data = get_data_from_named_range(wb, named_rng_names.get('INTERNAL_KEY'))
+        if named_rng_data.get('Exec', False) == False:
+            return
+        # ==============================================================================================================
+        FirstRowData = named_rng_data.get('min_row')
+        first_row = FirstRowData - 3  # всего строк для заголовков 3
+        FirstRowData += 1
+
+        SetRowIdx = storage_sheet[sheet_name]['SET_ROW_IDX']
+        columns_layout = storage_sheet[sheet_name]['columns_layout']
+        collect_bs = storage_sheet[sheet_name]['collect_bs']
+        collect_struct_columns = storage_sheet[sheet_name]['struct_columns']
+
+        for i, v in SetRowIdx.items():
+            for data_type, Letter in columns_layout.items():
+                src_formula = v[EnumColumnSettings.FORMULA_MONTH]['value']
+                src_formula = src_formula.replace('$', '')
+                for elem in collect_bs:
+                    if elem.get("data_type") == int(data_type) and \
+                            elem.get("year") == int(collect_struct_columns[data_type]['dateRange'][0][-4:]):
+                        src_formula = src_formula.replace(
+                            f'{elem.get("index")}_{elem.get("bs")}',str(float(elem.get("sum"))))
+                set_value_cell(sheet[f"{Letter}{i}"],
+                               formula_translator.convert_russian_formula(src_formula))
+
+
+    if generating_type.get('NeedGeneratingReport', False):
+        init_some_data_generating_report('type_factory', selected_factories, factories_all, ['_SET_ROW', '_INTERNAL_KEY'])
+        init_some_data_generating_report('type_summary_rep', selected_reports, reports_all, ['_SUM_REP_SET_ROW', '_SUM_REP_INTERNAL_KEY'])
+
+        prepare_and_fill_data_generating_report('type_factory', selected_factories, ['_SET_ROW', '_INTERNAL_KEY'])
+        prepare_and_fill_data_generating_report('type_summary_rep', selected_reports, ['_SUM_REP_SET_ROW', '_SUM_REP_INTERNAL_KEY'])
+
+    if generating_type.get('NeedStaticReport', False):
+        static_report_settings = {
+            '3' : { # Отчёт КПД ДО
+                'SET_ROW' : '_STATIC_REP_SET_ROW1',
+                'INTERNAL_KEY' : '_STATIC_REP_INTERNAL_KEY1',
+            }
+        }
+        for sel_rep in selected_reports:
+            if static_report_settings.get(sel_rep, False):
+                init_some_data_static_report(sel_rep, static_report_settings[sel_rep])
+        for sel_rep in selected_reports:
+            if static_report_settings.get(sel_rep, False):
+                prepare_and_fill_data_static_report(sel_rep, static_report_settings[sel_rep])
 
     # ===================================================================================================================
 
@@ -1135,7 +1514,6 @@ def main_download_report(download_type, selected_factories, selected_reports, sr
         as_attachment=True,
         download_name=filename
     )
-
 
 # ============================================================================================
 def fill_flat_data(
@@ -1309,13 +1687,7 @@ def fill_flat_data(
             # исключаем ошибочные формулы в виде ссылок на другие листы (Excel-формулы)
             if '!' in formula:
                 return '0'
-            pattern = re.compile(
-                r'(?P<CELL_OFFSET>\{[^}]+\})'
-                r'|(?P<ESCAPED>\$[0-9]+)'
-                r'|(?P<FUNC_OR_VAR>[a-zA-Zа-яА-ЯёЁ0-9_]+)'
-                r'|(?P<OPERATOR>[;(),+\-*/:])'
-                r'|(?P<NUMBER>[0-9]+)'
-            )
+            pattern = re.compile(get_hard_mirror_pattern())
 
             for match in pattern.finditer(formula):
                 token_type = match.lastgroup
@@ -1474,8 +1846,6 @@ def fill_flat_data(
 
     # for i in range(FirstRowData, LastRowData + 1):
     for i, v in SetRowIdx.items():
-        if i == 9 and sheet.title == 'Баланс ЗС':
-            q = 0
         cell_key_spec = sheet.cell(row=i, column=key_spec)
         cell_bs = sheet.cell(row=i, column=prepared_column_offset_1)
         cell_calc = sheet.cell(row=i, column=prepared_column_offset_2)

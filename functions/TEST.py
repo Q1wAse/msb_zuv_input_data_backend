@@ -97,8 +97,3 @@ def test_formula(formula):
 
 # for i, formula in enumerate(formulas):
 #     test_formula(formula)
-
-fields_src_list =['product','sobstv','mest','post_zuv']
-fields_non_zero_con_str = '(' + '.id != 0 OR '.join(fields_src_list) + '.id != 0) AND'
-
-print(fields_non_zero_con_str)
