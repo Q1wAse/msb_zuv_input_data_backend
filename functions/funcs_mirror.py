@@ -415,7 +415,7 @@ def main_download_report(download_type, selected_factories, selected_reports, sr
 
     settings = uf.get_data_from_query(
         'SELECT id, "DO", pj FROM tab_factories_d816_4 WHERE id IN :factory_ids',
-        {"factory_ids": tuple(selected_factories)})
+        {"factory_ids": tuple(factories_all)})
     if not settings:
         return uf.get_msg_struct(uf.EnumMsg.SETTINGS_FOR_REPORT_NOT_FOUND)
 
@@ -1083,6 +1083,9 @@ def main_download_report(download_type, selected_factories, selected_reports, sr
 
                         sheet.column_dimensions[col_letter].width = 15
 
+                    if ColumnType == 'PercentOfOutput':
+                        sheet.column_dimensions.group(start=col_letter, end=col_letter, hidden=True)
+
                     # Заголовок уровня 2 (внутренние ключи)
                     set_value_cell(sheet.cell(row=first_row + 3, column=col_num), col.get('internal_key'))
 
@@ -1429,11 +1432,12 @@ def main_download_report(download_type, selected_factories, selected_reports, sr
         generating_report_settings = {
         # ключ в "Таблица Типы отчётов" | index - индекс именованного диапазона
             '1': {'index': '1'}, # План общий
-            '2': {'index': ''}, # Факт общий
+            '2': {'index': '4'}, # Факт общий
             '3': {'index': '2'}, # Баланс ЗС
             '5': {'index': '3'}, # ЕЖО
         }
-        reports_all_list = list(generating_report_settings.keys())
+        # reports_all_list = list(generating_report_settings.keys())
+        reports_all_list = reports_all_list = [value.get('index') for key, value in generating_report_settings.items()]
         selected_index_report = [
             generating_report_settings[report_id]['index']
             for report_id in selected_reports

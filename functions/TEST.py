@@ -97,3 +97,13 @@ def test_formula(formula):
 
 # for i, formula in enumerate(formulas):
 #     test_formula(formula)
+generating_report_settings = {
+# ключ в "Таблица Типы отчётов" | index - индекс именованного диапазона
+    '1': {'index': '1'}, # План общий
+    '2': {'index': '4'}, # Факт общий
+    '3': {'index': '2'}, # Баланс ЗС
+    '5': {'index': '3'}, # ЕЖО
+}
+
+reports_all_list = [value.get('index') for key, value in generating_report_settings.items()]
+print(reports_all_list)
