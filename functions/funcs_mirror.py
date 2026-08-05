@@ -1,4 +1,5 @@
 import sys, os, re, io, copy, openpyxl
+from datetime import datetime
 
 from flask import session, g, abort, send_file
 from sqlalchemy import text
@@ -9,7 +10,7 @@ from pathlib import Path
 from openpyxl import load_workbook
 from openpyxl.cell import Cell
 from openpyxl.utils.cell import range_boundaries, coordinate_to_tuple
-from openpyxl.utils import get_column_letter
+from openpyxl.utils import get_column_letter, column_index_from_string
 from openpyxl.worksheet.cell_range import MultiCellRange
 from openpyxl.styles import Border, Side, NamedStyle
 # from openpyxl.styles import Font, Alignment, numbers, Border, Side, PatternFill
@@ -17,6 +18,7 @@ from openpyxl.styles import Border, Side, NamedStyle
 
 import msb_zuv_input_data_backend.functions.utility_functions as uf
 import msb_zuv_input_data_backend.functions.formula_translator as formula_translator
+
 
 # ============================================================================================
 class EnumCellType(Enum):
@@ -41,6 +43,8 @@ class EnumColumnSettings(str, Enum):
     FORMULA_MONTH = 'formula_month'
     FORMULA_POO = 'formula_PercentOfOutput'
     ROW_CHECK = 'row_check'
+
+
 # ============================================================================================
 
 # g_report_template_name = "Астрахань.xlxs"
@@ -93,10 +97,29 @@ template_setups = [
     }
 ]
 
+generating_report_settings = {
+    # ключ в "Таблица Типы отчётов" | index - индекс именованного диапазона
+    '1': {'index': '1'},  # План общий
+    '2': {'index': '4'},  # Факт общий
+    '3': {'index': '2'},  # Баланс ЗС
+    '5': {'index': '3'},  # ЕЖО
+}
+
+
 # ============================================================================================
-def get_row_list_msb_zuv_d816_4(year: int, ver_plan: int, var_plan: int, bs: list, do: int, pj: int, data_type: int):
+def get_row_list_msb_zuv_d816_4(
+        year: int,
+        ver_plan: int,
+        var_plan: int,
+        bs: list,
+        do: int,
+        pj: int,
+        data_type: int,
+        only_year: bool = False
+):
+    period = 'CALMONTH = 0 AND CALQUART = 0 AND' if only_year else 'CALMONTH <> 0 AND'
     db = uf.get_db_connection()
-    col_sql = text("""
+    col_sql = text(f"""
                 SELECT
                     SUM(SUM),
                     BS,
@@ -111,7 +134,7 @@ def get_row_list_msb_zuv_d816_4(year: int, ver_plan: int, var_plan: int, bs: lis
                     BCBIM0002::INT = :do AND            -- Завод (Дочернее общество)
                     pj = :pj AND                        -- Перерабатывающий комплекс (Поставщики ЖУВ)
                     DATA_TYPE::INT = :data_type AND     -- Тип данных
-                    CALMONTH <> 0 AND
+                    {period}
                     DBS = 0
                 GROUP BY BS, CALYEAR, CALQUART, CALMONTH
                 ORDER by CALMONTH
@@ -232,15 +255,18 @@ def download_report(year, template_name):
         download_name=filename
     )
 
+
 # ============================================================================================
 # ============================================================================================
 def get_hard_mirror_pattern():
     return r'(?P<CELL_OFFSET>\{[^}]+\})' \
-                r'|(?P<ESCAPED>\$[0-9]+)' \
-                r'|(?P<FUNC_OR_VAR>[a-zA-Zа-яА-ЯёЁ0-9_]+)' \
-                r'|(?P<OPERATOR>[;(),+\-*/:])' \
-                r'|(?P<NUMBER>[0-9]+)'
-def get_data_from_named_range(wb,name):
+           r'|(?P<ESCAPED>\$[0-9]+)' \
+           r'|(?P<FUNC_OR_VAR>[a-zA-Zа-яА-ЯёЁ0-9_]+)' \
+           r'|(?P<OPERATOR>[;(),+\-*/:])' \
+           r'|(?P<NUMBER>[0-9]+)'
+
+
+def get_data_from_named_range(wb, name):
     named_range = None
     sheet = None
     min_col, min_row, max_col, max_row = 0, 0, 0, 0
@@ -252,16 +278,18 @@ def get_data_from_named_range(wb,name):
         if sheet_name in wb.sheetnames:
             sheet = wb[sheet_name]
     except Exception as e:
-        return { 'Exec' : False }
+        return {'Exec': False}
     return {
-        'Exec'          : True,
-        'sheet_name'    : sheet_name,
-        'sheet'         : sheet,
-        'min_col'       : min_col,
-        'min_row'       : min_row,
-        'max_col'       : max_col,
-        'max_row'       : max_row
+        'Exec': True,
+        'sheet_name': sheet_name,
+        'sheet': sheet,
+        'min_col': min_col,
+        'min_row': min_row,
+        'max_col': max_col,
+        'max_row': max_row
     }
+
+
 def set_value_cell(cell, value, ColumnType: EnumCellType = EnumCellType.INPUT):
     global G_STYLE_FONT_SIMPLE, \
         G_STYLE_FONT_FORMULA, \
@@ -420,10 +448,10 @@ def main_download_report(download_type, selected_factories, selected_reports, sr
         return uf.get_msg_struct(uf.EnumMsg.SETTINGS_FOR_REPORT_NOT_FOUND)
 
     generating_type = {
-        'NeedGeneratingReport' : bool(selected_factories or (any(item in selected_reports for item in
-                                    ['1','2','3','5']
-                                ))),
-        'NeedStaticReport' : any(item in selected_reports for item in ['4']),
+        'NeedGeneratingReport': bool(selected_factories or (any(item in selected_reports for item in
+                                                                ['1', '2', '3', '5']
+                                                                ))),
+        'NeedStaticReport': any(item in selected_reports for item in ['4']),
     }
 
     if len_src_columns > 1:
@@ -754,7 +782,8 @@ def main_download_report(download_type, selected_factories, selected_reports, sr
                             'MergeCount': count_columns,
                             'col_name': get_txt_col(column),
                             'calmonth': (q - 1) * 3 + m,
-                            'internal_key': get_internal_key(column, f"year{column.get('dateRange')[0][-4:]}:{simple_key}"),
+                            'internal_key': get_internal_key(column,
+                                                             f"year{column.get('dateRange')[0][-4:]}:{simple_key}"),
                             'period': column.get('dateRange')[0][-4:]
                         })
                     elif ColumnType in ('SecondMinusFirst', 'PercentOfComplete', 'PercentOfOutput'):
@@ -776,6 +805,47 @@ def main_download_report(download_type, selected_factories, selected_reports, sr
                             'FormulaLink': FormulaLink,
                             'period': ''
                         })
+        #  Добавляем в макет данные под годовые столбцы трёхлетки (+1 и +2 года, т.е. по 2 столбца на каждый вариант)
+        for y in range(1, 3):
+            for index_column, column in enumerate(columns):
+                ColumnType = column.get('ColumnType')
+                if ColumnType == 'Selected' and column.get('IsByear', False):
+                    year = int(column.get('dateRange')[0][-4:]) + y
+                    simple_key = f"Byear{year}"
+                    columns_layout.append({
+                        'Letter': '',
+                        'ColumnType': 'Byear',
+                        'SrcKey': column.get('SrcKey'),
+                        'SrcKeyByear': len_src_columns * y + int(column.get('SrcKey')),
+                        'type': simple_key,
+                        'data_type_col': index_column,
+                        'IsNeedMerge': False,
+                        'MergeCount': 0,
+                        'col_name': get_txt_col(column),
+                        'internal_key': get_internal_key(column, f"year{year}:{simple_key}"),
+                        'period': year
+                    })
+        date_format = "%d.%m.%Y"
+
+        # len_col = len(columns)
+        # for y in range(1, 3):
+        #     for i in range(len_col):
+        #         ColumnType = columns[i].get('ColumnType', '')
+        #         if ColumnType == 'Selected':
+        #             col = copy.deepcopy(columns[i])
+        #             col['ColumnType'] = 'Byear'
+        #             col['SrcKey'] += len_src_columns * y
+        #
+        #             new_dates = []
+        #             for date_str in col["dateRange"]:
+        #                 date_obj = datetime.strptime(date_str, date_format)
+        #                 new_date_obj = date_obj.replace(year=date_obj.year + y)
+        #
+        #                 new_dates.append(new_date_obj.strftime(date_format))
+        #
+        #             col["dateRange"] = new_dates
+        #
+        #             columns.append(col)
 
     # ==================================================================================================================
     # Удаление неиспользуемых листов
@@ -875,12 +945,39 @@ def main_download_report(download_type, selected_factories, selected_reports, sr
             storage_sheet[sheet_name_set_row]['SET_ROW_LIST'] = {}
             storage_sheet[sheet_name_set_row]['SET_ROW_IDX'] = {}
             storage_sheet[sheet_name_set_row]['SET_ROW_KEY'] = {}
+            storage_sheet[sheet_name_set_row]['SET_ROW_CHECK'] = {}
+
+            # ==========================================================================================================
+            Byear = []
+            storage_sheet[sheet_name_set_row]['Byear'] = Byear
+            len_col = len(columns)
+            for y in range(1, 3):
+                for i in range(len_col):
+                    ColumnType = columns[i].get('ColumnType', '')
+                    if ColumnType == 'Selected' and columns[i].get('IsByear', False):
+                        col = copy.deepcopy(columns[i])
+                        col['ColumnType'] = 'Byear'
+                        col['SrcKey'] += len_src_columns * y
+
+                        new_dates = []
+                        for date_str in col["dateRange"]:
+                            date_obj = datetime.strptime(date_str, date_format)
+                            new_date_obj = date_obj.replace(year=date_obj.year + y)
+
+                            new_dates.append(new_date_obj.strftime(date_format))
+
+                        col["dateRange"] = new_dates
+
+                        Byear.append(col)
+            # ==========================================================================================================
 
             for key, idx_col in storage_sheet[sheet_name_set_row]['columns_settings'].items():
                 if key not in storage_sheet[sheet_name_set_row]['SET_ROW_LIST']:
                     storage_sheet[sheet_name_set_row]['SET_ROW_LIST'][key] = []
                 if key not in storage_sheet[sheet_name_set_row]['SET_ROW_KEY']:
                     storage_sheet[sheet_name_set_row]['SET_ROW_KEY'][key] = {}
+                if key not in storage_sheet[sheet_name_set_row]['SET_ROW_CHECK']:
+                    storage_sheet[sheet_name_set_row]['SET_ROW_CHECK'][key] = {}
 
             for sheet_name_rng_ik, cell_coordinates_rng_ik in def_range_ik.destinations:
                 _, FirstRowData, _, _ = range_boundaries(cell_coordinates_rng_ik)
@@ -1010,6 +1107,7 @@ def main_download_report(download_type, selected_factories, selected_reports, sr
                 key_bs = storage_sheet[sheet_name_set_row]['SET_ROW_LIST'][EnumColumnSettings.KEY_BS]
                 LastRowData = storage_sheet[sheet_name_set_row]['LastRowData']
                 SetRowIdx = storage_sheet[sheet_name_set_row]['SET_ROW_IDX']
+                Byear = storage_sheet[sheet_name_set_row]['Byear']
 
                 dict_bs = []
                 loc_index_offset = set_row_right_col_index + 1 + offset_ind_col
@@ -1058,8 +1156,19 @@ def main_download_report(download_type, selected_factories, selected_reports, sr
                     col['Letter'] = col_letter
                     ColumnType = col.get('ColumnType')
 
-                    if ColumnType == 'Selected':
-                        # Заголовок уровня 0
+                    # Уровни заголовков:
+                    #           first_row
+                    # 1 lvl (first_row + 1)
+                    # 2 lvl (first_row + 2)
+                    # 3 lvl (first_row + 3)
+                    #           key_row
+                    # data_row1
+                    # data_row2
+                    # data_row3
+                    # ...
+
+                    if ColumnType == 'Selected' or ColumnType == 'Byear':
+                        # Заголовок уровня [1-2] (объединённый)
                         cell = sheet.cell(row=first_row + 1, column=col_num)
                         sheet.merge_cells(start_row=first_row + 1, start_column=col_num, end_row=first_row + 2,
                                           end_column=col_num)
@@ -1067,7 +1176,7 @@ def main_download_report(download_type, selected_factories, selected_reports, sr
 
                         sheet.column_dimensions[col_letter].width = 25  # 22 #16.29
                     else:
-                        # Заголовок уровня 1
+                        # Заголовок уровня 2
                         cell = sheet.cell(row=first_row + 2, column=col_num)
                         if G_STYLE_RULE_GREEN_RED_DASH and ColumnType in ('SecondMinusFirst', 'PercentOfComplete'):
                             current_range = f'${col_letter}${FirstRowData}:${col_letter}${LastRowData}'
@@ -1086,7 +1195,14 @@ def main_download_report(download_type, selected_factories, selected_reports, sr
                     if ColumnType == 'PercentOfOutput':
                         sheet.column_dimensions.group(start=col_letter, end=col_letter, hidden=True)
 
-                    # Заголовок уровня 2 (внутренние ключи)
+                    if ColumnType == 'Selected':
+                        # Добавляем в список правил ячейки с проверками
+                        for row in storage_sheet[sheet_name_set_row]['SET_ROW_LIST'][EnumColumnSettings.ROW_CHECK]:
+                            row_index = next(iter(row))
+                            current_range = f'${col_letter}${row_index}'
+                            multi_range_rules.add(current_range)
+
+                    # Заголовок уровня 3 (внутренние ключи)
                     set_value_cell(sheet.cell(row=first_row + 3, column=col_num), col.get('internal_key'))
 
                     if 'IsNeedMerge' in col and col['IsNeedMerge']:
@@ -1122,7 +1238,7 @@ def main_download_report(download_type, selected_factories, selected_reports, sr
                                 cell = sheet.cell(row=first_row + 1, column=col_num)
                                 set_value_cell(cell, GroupName, EnumCellType.TITLE_GROUP1_LVL1)
 
-                    if ColumnType == 'Selected':
+                    if ColumnType == 'Selected' or ColumnType == 'Byear':
                         cell = sheet.cell(row=first_row, column=col_num)
                         if 'year' in col['type']:
                             set_value_cell(cell, col.get("period"), EnumCellType.TITLE_LVL1)
@@ -1153,6 +1269,16 @@ def main_download_report(download_type, selected_factories, selected_reports, sr
                             data_type = int(column.get('typeData'))
                             query_res_for_column.append(
                                 get_row_list_msb_zuv_d816_4(year, ver_plan, var_plan, dict_bs, do, pj, data_type))
+                    if Byear:
+                        for column in Byear:
+                            year = column.get('dateRange')[0][-4:]
+                            ver_plan = column.get('versionPlaning', 0)
+                            var_plan = column.get('variantPlaning', 0)
+                            do = loc_settings.DO
+                            pj = loc_settings.pj
+                            data_type = int(column.get('typeData'))
+                            query_res_for_column.append(
+                                get_row_list_msb_zuv_d816_4(year, ver_plan, var_plan, dict_bs, do, pj, data_type, True))
                 elif type_sheet == 'type_summary_rep':
                     for index_column, column in enumerate(struct_columns, start=1):
                         if column.get('ColumnType') == 'Selected':
@@ -1175,9 +1301,9 @@ def main_download_report(download_type, selected_factories, selected_reports, sr
     def init_some_data_static_report(selected_report, named_rng_names):
         nonlocal storage_sheet
 
-        #===============================================================================================================
-        #KIVA SET_ROW
-        named_rng_data = get_data_from_named_range(wb,named_rng_names.get('SET_ROW'))
+        # ===============================================================================================================
+        # KIVA SET_ROW
+        named_rng_data = get_data_from_named_range(wb, named_rng_names.get('SET_ROW'))
         if named_rng_data.get('Exec', False) == False:
             return
         sheet_name_set_row = named_rng_data.get('sheet_name')
@@ -1185,7 +1311,7 @@ def main_download_report(download_type, selected_factories, selected_reports, sr
         set_row_right_col_index = named_rng_data.get('max_col')
         sheet = named_rng_data.get('sheet')
         # ===============================================================================================================
-        #KIVA INTERNAL_KEY
+        # KIVA INTERNAL_KEY
         named_rng_data = get_data_from_named_range(wb, named_rng_names.get('INTERNAL_KEY'))
         if named_rng_data.get('Exec', False) == False:
             return
@@ -1198,17 +1324,17 @@ def main_download_report(download_type, selected_factories, selected_reports, sr
         FirstRowData += 1
 
         storage_sheet[sheet_name_set_row]['columns_layout'] = {
-            '1' : get_column_letter(set_row_right_col_index+3),
-            '15' : get_column_letter(set_row_right_col_index+6)
+            '1': get_column_letter(set_row_right_col_index + 3),
+            '15': get_column_letter(set_row_right_col_index + 6)
         }
         collect_struct_columns = {
-            '1'     : {
-                'filled' : False,
-                'versionPlaning' : 0,
-                'variantPlaning' : 0,
-                'dateRange' : [],
+            '1': {
+                'filled': False,
+                'versionPlaning': 0,
+                'variantPlaning': 0,
+                'dateRange': [],
             },
-            '15'    : {
+            '15': {
                 'filled': False,
                 'dateRange': [],
             }
@@ -1241,7 +1367,6 @@ def main_download_report(download_type, selected_factories, selected_reports, sr
         loc_index_offset = set_row_right_col_index + 1 + offset_ind_col
         last_row = sheet.max_row
 
-
         for i in range(1, last_row + 1):
             if i >= FirstRowData:
                 for key, idx_col in storage_sheet[sheet_name_set_row]['columns_settings'].items():
@@ -1265,7 +1390,7 @@ def main_download_report(download_type, selected_factories, selected_reports, sr
                             storage_sheet[sheet_name_set_row]['FirstRowWithBS'] = i
 
                         if key == EnumColumnSettings.FORMULA_MONTH:
-                        #===============================================================================================
+                            # ===============================================================================================
                             new_value = '0'
                             src_formula = ''
                             pattern = re.compile(get_hard_mirror_pattern())
@@ -1308,7 +1433,7 @@ def main_download_report(download_type, selected_factories, selected_reports, sr
                                     new_value = value
 
                             src_formula = f'{src_formula}{new_value}'
-                        #===============================================================================================
+                        # ===============================================================================================
         if required_conditions:
             # Запрос на получение цифр
             db = uf.get_db_connection()
@@ -1379,13 +1504,12 @@ def main_download_report(download_type, selected_factories, selected_reports, sr
             """)
             result = db.execute(query_sql, {
                 'index_do': index_do,
-                'do' : do,
-                'pj' : pj,
-                'bs' : bs,
+                'do': do,
+                'pj': pj,
+                'bs': bs,
             }).fetchall()
             if result:
                 storage_sheet[sheet_name_set_row]['collect_bs'] = res = [row._asdict() for row in result]
-
 
     # [STATIC] Подготовка и заполнение листов с динамическим построением отчёта
     def prepare_and_fill_data_static_report(selected_report, named_rng_names):
@@ -1423,19 +1547,18 @@ def main_download_report(download_type, selected_factories, selected_reports, sr
                     if elem.get("data_type") == int(data_type) and \
                             elem.get("year") == int(collect_struct_columns[data_type]['dateRange'][0][-4:]):
                         src_formula = src_formula.replace(
-                            f'{elem.get("index")}_{elem.get("bs")}',str(float(elem.get("sum"))))
+                            f'{elem.get("index")}_{elem.get("bs")}', str(float(elem.get("sum"))))
                 set_value_cell(sheet[f"{Letter}{i}"],
                                formula_translator.convert_russian_formula(src_formula))
 
-
     if generating_type.get('NeedGeneratingReport', False):
-        generating_report_settings = {
-        # ключ в "Таблица Типы отчётов" | index - индекс именованного диапазона
-            '1': {'index': '1'}, # План общий
-            '2': {'index': '4'}, # Факт общий
-            '3': {'index': '2'}, # Баланс ЗС
-            '5': {'index': '3'}, # ЕЖО
-        }
+        # generating_report_settings = {
+        # # ключ в "Таблица Типы отчётов" | index - индекс именованного диапазона
+        #     '1': {'index': '1'}, # План общий
+        #     '2': {'index': '4'}, # Факт общий
+        #     '3': {'index': '2'}, # Баланс ЗС
+        #     '5': {'index': '3'}, # ЕЖО
+        # }
         # reports_all_list = list(generating_report_settings.keys())
         reports_all_list = reports_all_list = [value.get('index') for key, value in generating_report_settings.items()]
         selected_index_report = [
@@ -1444,17 +1567,20 @@ def main_download_report(download_type, selected_factories, selected_reports, sr
             if report_id in generating_report_settings
         ]
 
-        init_some_data_generating_report('type_factory', selected_factories, factories_all, ['_SET_ROW', '_INTERNAL_KEY'])
-        init_some_data_generating_report('type_summary_rep', selected_index_report, reports_all_list, ['_SUM_REP_SET_ROW', '_SUM_REP_INTERNAL_KEY'])
+        init_some_data_generating_report('type_factory', selected_factories, factories_all,
+                                         ['_SET_ROW', '_INTERNAL_KEY'])
+        init_some_data_generating_report('type_summary_rep', selected_index_report, reports_all_list,
+                                         ['_SUM_REP_SET_ROW', '_SUM_REP_INTERNAL_KEY'])
 
         prepare_and_fill_data_generating_report('type_factory', selected_factories, ['_SET_ROW', '_INTERNAL_KEY'])
-        prepare_and_fill_data_generating_report('type_summary_rep', selected_index_report, ['_SUM_REP_SET_ROW', '_SUM_REP_INTERNAL_KEY'])
+        prepare_and_fill_data_generating_report('type_summary_rep', selected_index_report,
+                                                ['_SUM_REP_SET_ROW', '_SUM_REP_INTERNAL_KEY'])
 
     if generating_type.get('NeedStaticReport', False):
         static_report_settings = {
-            '4' : { # Отчёт КПД ДО
-                'SET_ROW' : '_STATIC_REP_SET_ROW1',
-                'INTERNAL_KEY' : '_STATIC_REP_INTERNAL_KEY1',
+            '4': {  # Отчёт КПД ДО
+                'SET_ROW': '_STATIC_REP_SET_ROW1',
+                'INTERNAL_KEY': '_STATIC_REP_INTERNAL_KEY1',
             }
         }
         for sel_rep in selected_reports:
@@ -1479,6 +1605,7 @@ def main_download_report(download_type, selected_factories, selected_reports, sr
         as_attachment=True,
         download_name=filename
     )
+
 
 # ============================================================================================
 def fill_flat_data(
@@ -1891,20 +2018,27 @@ def fill_flat_data(
             #  (str(cell_bs.value).startswith('='))): # логика для формул на листах СВОД
             for idx, col in enumerate(sheet_columns_layout):
                 col_letter = col.get('Letter')
-                data_type_col = col["data_type_col"]
-                SrcKey = col["SrcKey"]
-                ColumnType = col["ColumnType"]
+                data_type_col = col['data_type_col']
+                SrcKey = col['SrcKey']
+                ColumnType = col['ColumnType']
 
-                if "year" in col["type"]:
+                if 'Byear' in col['type']:
+                    if ColumnType == 'Byear':
+                        SrcKeyByear = col['SrcKeyByear']
+                        cell_val = sheet[f'{col_letter}{i}']
+                        set_calc_cell_val(cell_val, col_letter,
+                                          query_res_for_column[SrcKey], col, idx,
+                                          ColumnCellType=EnumCellType.POSITIVE_NEGATIVE)
+                elif 'year' in col['type']:
                     src_formula = ''
                     if ColumnType == 'Selected':
-                        q1 = get_col_letter_by_type("Q1", data_type_col)
-                        q2 = get_col_letter_by_type("Q2", data_type_col)
-                        q3 = get_col_letter_by_type("Q3", data_type_col)
-                        q4 = get_col_letter_by_type("Q4", data_type_col)
-                        set_value_cell(sheet[f"{col_letter}{i}"], f"={q1}{i}+{q2}{i}+{q3}{i}+{q4}{i}")
+                        q1 = get_col_letter_by_type('Q1', data_type_col)
+                        q2 = get_col_letter_by_type('Q2', data_type_col)
+                        q3 = get_col_letter_by_type('Q3', data_type_col)
+                        q4 = get_col_letter_by_type('Q4', data_type_col)
+                        set_value_cell(sheet[f'{col_letter}{i}'], f'={q1}{i}+{q2}{i}+{q3}{i}+{q4}{i}')
                     elif ColumnType == 'PercentOfOutput':
-                        cell_val = sheet[f"{col_letter}{i}"]
+                        cell_val = sheet[f'{col_letter}{i}']
                         set_calc_cell_val(cell_val, col_letter,
                                           query_res_for_column[SrcKey], col, idx,
                                           ColumnSettings=EnumColumnSettings.FORMULA_POO)
@@ -2058,17 +2192,35 @@ def upload_report_template(factory_id: str, file_storage: FileStorage):
                     end_col = sheet.max_column + 1
                     amount_col = end_col - start_col
 
-                    # Сброс ширины столбцов (можно удалять для ускорения процесса)
-                    # так как кроме визуала ни на что не влияет
-                    # и при формировании отчёта всё равно будет выставлена нужная ширина для всех столбцов
-                    # если правильно обнаружил, то 8.43 является значением по умолчанию
-                    for i in range(start_col, end_col):
-                        sheet.column_dimensions[get_column_letter(i)].width = 8.43
+                    start_col_letter = get_column_letter(start_col)
+                    finded_start_col_letter = False
+
+                    # Очистка сгенерированных столбцов:
+                    #   из-за особенностей работы библы openpyxl некоторые очистки приходится делать доплнительно
+                    #   удаление группировки, объединённые ячейки, ширина столбцов
+                    #   если правильно обнаружил, то 8.43 ширина является значением по умолчанию
+
+                    # Из-за того, что в column_dimensions столбцы могут храниться в хаотичном порядке
+                    # небходимо их сначала отсортировать, чтобы задействовать только сгенерированные столбцы
+                    sorted_dims = sorted(
+                        sheet.column_dimensions.values(), key=lambda x: column_index_from_string(x.index)
+                        if hasattr(x, 'index') and x.index else
+                        column_index_from_string(x.key)
+                    )
+
+                    for col_dim in sorted_dims:
+                        col_idx = column_index_from_string(
+                            col_dim.index if hasattr(col_dim, 'index') and col_dim.index else col_dim.key)
+
+                        if col_idx >= start_col:
+                            col_dim.width = 8.43
+                            col_dim.outline_level = 0
+                            col_dim.hidden = False
 
                     # Очистка столбцов
                     sheet.delete_cols(idx=start_col, amount=amount_col)
 
-                    # Из-за особенностей openpyxl приходится дополнительно делать очистку по merged ячейкам
+                    # Из-за особенностей openpyxl приходится дополнительно делать очистку по merged ячейкам(диапазонам)
                     merged_range = list(sheet.merged_cells.ranges)
                     for m_range in merged_range:
                         merged_start_col, _, merged_end_col, _ = m_range.bounds
@@ -2080,14 +2232,139 @@ def upload_report_template(factory_id: str, file_storage: FileStorage):
             # ===============================================================================
 
         factories_all = [row.id for row in uf.get_data_from_query("SELECT id FROM tab_factories_d816_4")]
-        reports_all = [1,2]#[row.id for row in get_data_from_query("SELECT id FROM tab_type_reports_d816_4")]
+        # reports_all = [row.id for row in uf.get_data_from_query("SELECT id FROM tab_type_reports_d816_4")]
+        reports_all_list = [value.get('index') for key, value in generating_report_settings.items()]
 
-        if factories_all and reports_all:
+        if factories_all and reports_all_list:
             prepare_sheets(factories_all, ['_SET_ROW', '_INTERNAL_KEY'])
-            prepare_sheets(reports_all, ['_SUM_REP_SET_ROW', '_SUM_REP_INTERNAL_KEY'])
+            prepare_sheets(reports_all_list, ['_SUM_REP_SET_ROW', '_SUM_REP_INTERNAL_KEY'])
         else:
             return uf.get_msg_struct(uf.EnumMsg.SETTINGS_FOR_REPORT_NOT_FOUND)
 
+        path_template = str(Path(uf.main_folder) / Path(uf.file_folder))
+
+        base_template_dir = os.environ.get("TEMPLATE_DIR", path_template)
+
+        target_filename = f"{g_report_template_name}".lower()
+        target_path = os.path.join(base_template_dir, target_filename)
+
+        dir_to_create = os.path.dirname(target_path)
+        if not os.path.exists(dir_to_create):
+            try:
+                os.makedirs(dir_to_create, mode=0o755, exist_ok=True)
+            except PermissionError:
+                wb.close()
+                return uf.get_msg_struct(uf.EnumMsg.ERROR_PERMISSION_CREATE_DIR_LINUX, dir_to_create)
+
+        # Перезапись существующего файла шаблона
+        if os.path.exists(target_path) and not os.access(target_path, os.W_OK):
+            wb.close()
+            return uf.get_msg_struct(uf.EnumMsg.ERROR_PERMISSION_OVERWRITE_FILE)
+
+        # Сохранение файла
+        wb.save(target_path)
+        wb.close()
+
+        return uf.get_msg_struct(uf.EnumMsg.SUCCESS)
+
+    except Exception as e:
+        if 'wb' in locals():
+            wb.close()
+        return uf.get_msg_struct(uf.EnumMsg.ERROR_SAVE_OR_PROC_TEMPLATE, str(e))
+# ============================================================================================
+# ============================================================================================
+def upload_report(factory_id: str, file_storage: FileStorage):
+    # Проверка, замена левых символов в имени файла
+    # safe_filename = secure_filename(file_storage.filename)
+
+    try:
+        file_bytes = file_storage.stream.read()
+        file_stream = io.BytesIO(file_bytes)
+        wb = load_workbook(filename=file_stream, read_only=False)
+
+    except Exception as e:
+        return uf.get_msg_struct(uf.EnumMsg.ERROR_OPEN_TEMPLATE, str(e))
+
+    try:
+        def prepare_sheets(sheet_list, name_rng):
+            def_range_bs_list = []
+            def_range_ik_list = []
+            for sheet_id in sheet_list:
+                try:
+                    def_range_bs_list.append(wb.defined_names[f'{name_rng[0]}{sheet_id}'])
+                    def_range_ik_list.append(wb.defined_names[f'{name_rng[1]}{sheet_id}'])
+                except Exception as e:
+                    return uf.get_msg_struct(uf.EnumMsg.ERROR_VALID_NEW_TEMPLATE)
+            # ===============================================================================
+            for idx, def_range_bs in enumerate(def_range_bs_list):
+                def_range_ik = def_range_ik_list[idx]
+                sheet = None
+                set_row_right_col_index = None
+                start_row = None
+                start_col = None
+                end_col = None
+                amount_col = None
+
+                for sheet_name_rng_ik, cell_coordinates_rng_ik in def_range_ik.destinations:
+                    _, start_row, _, _ = range_boundaries(cell_coordinates_rng_ik)
+
+                for sheet_name_rng_bs, cell_coordinates_rng_bs in def_range_bs.destinations:
+                    _, _, set_row_right_col_index, _ = range_boundaries(cell_coordinates_rng_bs)
+                    sheet = wb[sheet_name_rng_bs]
+
+                if sheet is not None and set_row_right_col_index is not None and start_row is not None:
+                    start_col = set_row_right_col_index + 2
+                    end_col = sheet.max_column + 1
+                    amount_col = end_col - start_col
+
+                    start_col_letter = get_column_letter(start_col)
+                    finded_start_col_letter = False
+
+                    # Очистка сгенерированных столбцов:
+                    #   из-за особенностей работы библы openpyxl некоторые очистки приходится делать доплнительно
+                    #   удаление группировки, объединённые ячейки, ширина столбцов
+                    #   если правильно обнаружил, то 8.43 ширина является значением по умолчанию
+
+                    # Из-за того, что в column_dimensions столбцы могут храниться в хаотичном порядке
+                    # небходимо их сначала отсортировать, чтобы задействовать только сгенерированные столбцы
+                    sorted_dims = sorted(
+                        sheet.column_dimensions.values(), key=lambda x: column_index_from_string(x.index)
+                        if hasattr(x, 'index') and x.index else
+                        column_index_from_string(x.key)
+                    )
+
+                    for col_dim in sorted_dims:
+                        col_idx = column_index_from_string(
+                            col_dim.index if hasattr(col_dim, 'index') and col_dim.index else col_dim.key)
+
+                        if col_idx >= start_col:
+                            col_dim.width = 8.43
+                            col_dim.outline_level = 0
+                            col_dim.hidden = False
+
+                    # Очистка столбцов
+                    sheet.delete_cols(idx=start_col, amount=amount_col)
+
+                    # Из-за особенностей openpyxl приходится дополнительно делать очистку по merged ячейкам(диапазонам)
+                    merged_range = list(sheet.merged_cells.ranges)
+                    for m_range in merged_range:
+                        merged_start_col, _, merged_end_col, _ = m_range.bounds
+                        if merged_start_col <= end_col and merged_end_col >= start_col:
+                            try:
+                                sheet.merged_cells.remove(m_range)
+                            except ValueError:
+                                pass
+            # ===============================================================================
+
+        factories_all = [row.id for row in uf.get_data_from_query("SELECT id FROM tab_factories_d816_4")]
+        # reports_all = [row.id for row in uf.get_data_from_query("SELECT id FROM tab_type_reports_d816_4")]
+        reports_all_list = [value.get('index') for key, value in generating_report_settings.items()]
+
+        if factories_all and reports_all_list:
+            prepare_sheets(factories_all, ['_SET_ROW', '_INTERNAL_KEY'])
+            prepare_sheets(reports_all_list, ['_SUM_REP_SET_ROW', '_SUM_REP_INTERNAL_KEY'])
+        else:
+            return uf.get_msg_struct(uf.EnumMsg.SETTINGS_FOR_REPORT_NOT_FOUND)
 
         path_template = str(Path(uf.main_folder) / Path(uf.file_folder))
 

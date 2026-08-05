@@ -43,6 +43,7 @@ column_model = ns_download_report.model('ReportColumn', {
     'typeData': fields.String(description='Тип данных', required=True),
     'versionPlaning': fields.String(description='Версия планирования', required=True),
     'variantPlaning': fields.String(description='Вариант планирования', required=True),
+    'IsByear': fields.Boolean(description='Это трёхлетка', required=False),
     'dateRange': fields.List(
         fields.String,
         description='Диапазон дат [начало, конец]',
@@ -77,20 +78,23 @@ download_report_model = ns_download_report.model('ContainerReport', {
         required=True,
         example=[
             {
-                "typeData": "1",   #1 - План
-                "versionPlaning": "22600",
-                "variantPlaning" : "2260099",
-                "dateRange": ["01.01.2026", "31.12.2026"]
+                'typeData': '1',   #1 - План
+                'versionPlaning': '22600',
+                'variantPlaning' : '2260099',
+                'IsByear' : False,
+                'dateRange': ['01.01.2026', '31.12.2026']
             },
             {
-                "typeData": "1",   #1 - План
-                "versionPlaning": "22600",
-                "variantPlaning" : "2260010",
-                "dateRange": ["01.01.2026", "31.12.2026"]
+                'typeData': '1',   #1 - План
+                'versionPlaning': '22600',
+                'variantPlaning' : '2260010',
+                'IsByear' : False,
+                'dateRange': ['01.01.2026', '31.12.2026']
             },
             {
-                "typeData": "15",   #2 - Факт
-                "dateRange": ["01.01.2026", "31.12.2026"]
+                'typeData': '15',   #2 - Факт
+                'IsByear' : False,
+                'dateRange': ['01.01.2026', '31.12.2026']
             }
         ]
     )
@@ -236,6 +240,24 @@ class ClsUploadTemplate(Resource):
             v_file = uf.get_validate_param(param_list, "file")
 
             return funcs_mirror.upload_report_template(v_factory_id,v_file)
+
+        except Exception as e:
+            ns_download_report.abort(*errorhandler(e))
+#==============================================================================================================================
+#==============================================================================================================================
+@ns_download_report.route('/upload_report')
+class ClsUploadReport(Resource):
+    @ns_download_report.expect(container_upload_report_template)
+    def post(self):
+        try:
+            param_list: dict = container_upload_report_template.parse_args()
+
+            uf.clear_loc_log()
+
+            v_factory_id = uf.get_validate_param(param_list, "factory_id")
+            v_file = uf.get_validate_param(param_list, "file")
+
+            return funcs_mirror.upload_report(v_factory_id,v_file)
 
         except Exception as e:
             ns_download_report.abort(*errorhandler(e))
