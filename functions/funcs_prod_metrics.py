@@ -229,8 +229,8 @@ def get_list_percent_from_lists(list_base,list_slice):
                 v2_val2 = list_slice[i].get('variant2', 0.0)
                 result.append({
                     'month' : list_base[i].get('month', 0),
-                    'variant1' : round( v1_val2 / v1_val1 * 100, 2)  if v1_val1 != 0 else 0.0,
-                    'variant2' : round( v2_val2 / v2_val1 * 100, 2)  if v2_val1 != 0 else 0.0
+                    'variant1' : round( v1_val2 / v1_val1 * 100, 1)  if v1_val1 != 0 else 0.0,
+                    'variant2' : round( v2_val2 / v2_val1 * 100, 1)  if v2_val1 != 0 else 0.0
                 })
     return result
 #=======================================================================================================================
@@ -292,14 +292,14 @@ def convert_data_to_tab_front(result, key_name, reverse_diff=False):
         v2_val = dict_total['variant2']
 
         if reverse_diff:
-            diff_value = round(v2_val - v1_val, 2)
+            diff_value = round(v2_val - v1_val, 1)
             base_val = v2_val
         else:
-            diff_value = round(v1_val - v2_val, 2)
+            diff_value = round(v1_val - v2_val, 1)
             base_val = v1_val
 
         if base_val != 0:
-            pct_value = round((diff_value / base_val) * 100, 2)
+            pct_value = round((diff_value / base_val) * 100, 1)
         else:
             pct_value = 0.0
 
@@ -440,20 +440,20 @@ def get_calc_volume(
         if result:
             for row in result:
                 mapping = row._mapping
-                v1_val = round(float(row.variant1),2)
-                v2_val = round(float(row.variant2),2)
+                v1_val = float(row.variant1)
+                v2_val = float(row.variant2)
                 if reverse_diff:
-                    diff_value = round(v2_val - v1_val, 2)
+                    diff_value = round(v2_val - v1_val, 1)
                     base_val = v2_val
                 else:
-                    diff_value = round(v1_val - v2_val, 2)
+                    diff_value = round(v1_val - v2_val, 1)
                     base_val = v1_val
                 res.append({
                     data_slice : mapping.get(data_slice, None),
                     'variant1' : v1_val,
                     'variant2' : v2_val,
-                    'deviation' : diff_value,
-                    'percents' : round((diff_value / base_val) * 100, 2) if base_val != 0 else 0.0,
+                    'deviation' : round(diff_value,1),
+                    'percents' : round((diff_value / base_val) * 100, 1) if base_val != 0 else 0.0,
                 })
             # Насыщаем коллекцию недостающими месяцами, если такие есть
             if data_slice == 'month':
@@ -518,7 +518,7 @@ def get_exist_factories(tab_id):
 def get_exist_factory_collect(factory_id):
     db = uf.get_db_connection()
     res = {}
-    fields_src_list =['product','sobstv','mest','post_zuv']
+    fields_src_list =['product','sobstv','mest','post_zuv', 'ei']
     fields_list = [item for field in fields_src_list for item in (f'{field}_id', f'{field}_name')]
     fields_list.insert(0,'type_raspr')
     fields_str = """
@@ -530,7 +530,9 @@ def get_exist_factory_collect(factory_id):
         mest.id as {},
         mest.name as {},
         post_zuv.id as {},
-        post_zuv.name as {}
+        post_zuv.name as {},
+        ei.id as {},
+        ei.name as {}
     """
     fields_clr_str = fields_str.replace(' as {}','')
     fields_str = fields_str.format(*fields_list)
@@ -545,6 +547,7 @@ def get_exist_factory_collect(factory_id):
         LEFT JOIN tab_sobstv_d816_4 as sobstv ON pererab.tab_sobstv_d816_4_ids = sobstv.id
         LEFT JOIN tab_mest_d816_4 as mest ON pererab.tab_mest_d816_4_ids = mest.id
         LEFT JOIN tab_post_zuv_d816_4 as post_zuv ON pererab.tab_post_zuv_d816_4_ids = post_zuv.id
+        LEFT JOIN tab_ei_d816_4 as ei ON pererab.tab_ei_d816_4_ids = ei.id
         WHERE
             pererab.tab_type_raspr_d816_4_ids IN (5,7) AND
             pererab.tab_factory_d816_4_ids = {int(factory_id)}

@@ -68,7 +68,6 @@ class ClsStructDataProdMetrics(Resource):
                 'data_type': uf.get_pagin_data('data_type_kao', '', 1, 100),
                 'versions': list(grouped.values()),
                 'years' : uf.get_pagin_data('view_year', '', 1, 100),
-                'ei': uf.get_pagin_data('ei', '', 1, 100),
                 'last_update' : uf.get_last_update(),
             }
 
