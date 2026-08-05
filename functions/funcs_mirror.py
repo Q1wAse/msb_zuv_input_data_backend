@@ -2,6 +2,7 @@ import sys, os, re, io, copy, openpyxl
 from datetime import datetime
 
 from flask import session, g, abort, send_file
+from sqlalchemy.exc import SQLAlchemyError, DataError, OperationalError
 from sqlalchemy import text
 from werkzeug.datastructures import FileStorage
 from collections import defaultdict
@@ -2148,7 +2149,132 @@ def get_report_template(id):
 
 
 # ============================================================================================
-def upload_report_template(factory_id: str, file_storage: FileStorage):
+def upload_report_template(sheet_id: str, file_storage: FileStorage):
+    # Проверка, замена левых символов в имени файла
+    # safe_filename = secure_filename(file_storage.filename)
+
+    try:
+        file_bytes = file_storage.stream.read()
+        file_stream = io.BytesIO(file_bytes)
+        wb = load_workbook(filename=file_stream, read_only=False)
+
+    except Exception as e:
+        return uf.get_msg_struct(uf.EnumMsg.ERROR_OPEN_TEMPLATE, str(e))
+
+    try:
+        def prepare_sheets(sheet_list, name_rng):
+            def_range_bs_list = []
+            def_range_ik_list = []
+            for sheet_id in sheet_list:
+                try:
+                    def_range_bs_list.append(wb.defined_names[f'{name_rng[0]}{sheet_id}'])
+                    def_range_ik_list.append(wb.defined_names[f'{name_rng[1]}{sheet_id}'])
+                except Exception as e:
+                    return uf.get_msg_struct(uf.EnumMsg.ERROR_VALID_NEW_TEMPLATE)
+            # ===============================================================================
+            for idx, def_range_bs in enumerate(def_range_bs_list):
+                def_range_ik = def_range_ik_list[idx]
+                sheet = None
+                set_row_right_col_index = None
+                start_row = None
+                start_col = None
+                end_col = None
+                amount_col = None
+
+                for sheet_name_rng_ik, cell_coordinates_rng_ik in def_range_ik.destinations:
+                    _, start_row, _, _ = range_boundaries(cell_coordinates_rng_ik)
+
+                for sheet_name_rng_bs, cell_coordinates_rng_bs in def_range_bs.destinations:
+                    _, _, set_row_right_col_index, _ = range_boundaries(cell_coordinates_rng_bs)
+                    sheet = wb[sheet_name_rng_bs]
+
+                if sheet is not None and set_row_right_col_index is not None and start_row is not None:
+                    start_col = set_row_right_col_index + 2
+                    end_col = sheet.max_column + 1
+                    amount_col = end_col - start_col
+
+                    start_col_letter = get_column_letter(start_col)
+                    finded_start_col_letter = False
+
+                    # Очистка сгенерированных столбцов:
+                    #   из-за особенностей работы библы openpyxl некоторые очистки приходится делать дополнительно
+                    #   удаление группировки, объединённые ячейки, ширина столбцов
+                    #   если правильно обнаружил, то 8.43 ширина является значением по умолчанию
+
+                    # Из-за того, что в column_dimensions столбцы могут храниться в хаотичном порядке
+                    # небходимо их сначала отсортировать, чтобы задействовать только сгенерированные столбцы
+                    sorted_dims = sorted(
+                        sheet.column_dimensions.values(), key=lambda x: column_index_from_string(x.index)
+                        if hasattr(x, 'index') and x.index else
+                        column_index_from_string(x.key)
+                    )
+
+                    for col_dim in sorted_dims:
+                        col_idx = column_index_from_string(
+                            col_dim.index if hasattr(col_dim, 'index') and col_dim.index else col_dim.key)
+
+                        if col_idx >= start_col:
+                            col_dim.width = 8.43
+                            col_dim.outline_level = 0
+                            col_dim.hidden = False
+
+                    # Очистка столбцов
+                    sheet.delete_cols(idx=start_col, amount=amount_col)
+
+                    # Из-за особенностей openpyxl приходится дополнительно делать очистку по merged ячейкам(диапазонам)
+                    merged_range = list(sheet.merged_cells.ranges)
+                    for m_range in merged_range:
+                        merged_start_col, _, merged_end_col, _ = m_range.bounds
+                        if merged_start_col <= end_col and merged_end_col >= start_col:
+                            try:
+                                sheet.merged_cells.remove(m_range)
+                            except ValueError:
+                                pass
+            # ===============================================================================
+
+        factories_all = [row.id for row in uf.get_data_from_query("SELECT id FROM tab_factories_d816_4")]
+        # reports_all = [row.id for row in uf.get_data_from_query("SELECT id FROM tab_type_reports_d816_4")]
+        reports_all_list = [value.get('index') for key, value in generating_report_settings.items()]
+
+        if factories_all and reports_all_list:
+            prepare_sheets(factories_all, ['_SET_ROW', '_INTERNAL_KEY'])
+            prepare_sheets(reports_all_list, ['_SUM_REP_SET_ROW', '_SUM_REP_INTERNAL_KEY'])
+        else:
+            return uf.get_msg_struct(uf.EnumMsg.SETTINGS_FOR_REPORT_NOT_FOUND)
+
+        path_template = str(Path(uf.main_folder) / Path(uf.file_folder))
+
+        base_template_dir = os.environ.get("TEMPLATE_DIR", path_template)
+
+        target_filename = f"{g_report_template_name}".lower()
+        target_path = os.path.join(base_template_dir, target_filename)
+
+        dir_to_create = os.path.dirname(target_path)
+        if not os.path.exists(dir_to_create):
+            try:
+                os.makedirs(dir_to_create, mode=0o755, exist_ok=True)
+            except PermissionError:
+                wb.close()
+                return uf.get_msg_struct(uf.EnumMsg.ERROR_PERMISSION_CREATE_DIR_LINUX, dir_to_create)
+
+        # Перезапись существующего файла шаблона
+        if os.path.exists(target_path) and not os.access(target_path, os.W_OK):
+            wb.close()
+            return uf.get_msg_struct(uf.EnumMsg.ERROR_PERMISSION_OVERWRITE_FILE)
+
+        # Сохранение файла
+        wb.save(target_path)
+        wb.close()
+
+        return uf.get_msg_struct(uf.EnumMsg.SUCCESS)
+
+    except Exception as e:
+        if 'wb' in locals():
+            wb.close()
+        return uf.get_msg_struct(uf.EnumMsg.ERROR_SAVE_OR_PROC_TEMPLATE, str(e))
+# ============================================================================================
+# ============================================================================================
+def upload_report(sheet_id: str, file_storage: FileStorage):
     # Проверка, замена левых символов в имени файла
     # safe_filename = secure_filename(file_storage.filename)
 
@@ -2273,128 +2399,63 @@ def upload_report_template(factory_id: str, file_storage: FileStorage):
         return uf.get_msg_struct(uf.EnumMsg.ERROR_SAVE_OR_PROC_TEMPLATE, str(e))
 # ============================================================================================
 # ============================================================================================
-def upload_report(factory_id: str, file_storage: FileStorage):
-    # Проверка, замена левых символов в имени файла
-    # safe_filename = secure_filename(file_storage.filename)
-
-    try:
-        file_bytes = file_storage.stream.read()
-        file_stream = io.BytesIO(file_bytes)
-        wb = load_workbook(filename=file_stream, read_only=False)
-
-    except Exception as e:
-        return uf.get_msg_struct(uf.EnumMsg.ERROR_OPEN_TEMPLATE, str(e))
-
-    try:
-        def prepare_sheets(sheet_list, name_rng):
-            def_range_bs_list = []
-            def_range_ik_list = []
-            for sheet_id in sheet_list:
-                try:
-                    def_range_bs_list.append(wb.defined_names[f'{name_rng[0]}{sheet_id}'])
-                    def_range_ik_list.append(wb.defined_names[f'{name_rng[1]}{sheet_id}'])
-                except Exception as e:
-                    return uf.get_msg_struct(uf.EnumMsg.ERROR_VALID_NEW_TEMPLATE)
-            # ===============================================================================
-            for idx, def_range_bs in enumerate(def_range_bs_list):
-                def_range_ik = def_range_ik_list[idx]
-                sheet = None
-                set_row_right_col_index = None
-                start_row = None
-                start_col = None
-                end_col = None
-                amount_col = None
-
-                for sheet_name_rng_ik, cell_coordinates_rng_ik in def_range_ik.destinations:
-                    _, start_row, _, _ = range_boundaries(cell_coordinates_rng_ik)
-
-                for sheet_name_rng_bs, cell_coordinates_rng_bs in def_range_bs.destinations:
-                    _, _, set_row_right_col_index, _ = range_boundaries(cell_coordinates_rng_bs)
-                    sheet = wb[sheet_name_rng_bs]
-
-                if sheet is not None and set_row_right_col_index is not None and start_row is not None:
-                    start_col = set_row_right_col_index + 2
-                    end_col = sheet.max_column + 1
-                    amount_col = end_col - start_col
-
-                    start_col_letter = get_column_letter(start_col)
-                    finded_start_col_letter = False
-
-                    # Очистка сгенерированных столбцов:
-                    #   из-за особенностей работы библы openpyxl некоторые очистки приходится делать доплнительно
-                    #   удаление группировки, объединённые ячейки, ширина столбцов
-                    #   если правильно обнаружил, то 8.43 ширина является значением по умолчанию
-
-                    # Из-за того, что в column_dimensions столбцы могут храниться в хаотичном порядке
-                    # небходимо их сначала отсортировать, чтобы задействовать только сгенерированные столбцы
-                    sorted_dims = sorted(
-                        sheet.column_dimensions.values(), key=lambda x: column_index_from_string(x.index)
-                        if hasattr(x, 'index') and x.index else
-                        column_index_from_string(x.key)
-                    )
-
-                    for col_dim in sorted_dims:
-                        col_idx = column_index_from_string(
-                            col_dim.index if hasattr(col_dim, 'index') and col_dim.index else col_dim.key)
-
-                        if col_idx >= start_col:
-                            col_dim.width = 8.43
-                            col_dim.outline_level = 0
-                            col_dim.hidden = False
-
-                    # Очистка столбцов
-                    sheet.delete_cols(idx=start_col, amount=amount_col)
-
-                    # Из-за особенностей openpyxl приходится дополнительно делать очистку по merged ячейкам(диапазонам)
-                    merged_range = list(sheet.merged_cells.ranges)
-                    for m_range in merged_range:
-                        merged_start_col, _, merged_end_col, _ = m_range.bounds
-                        if merged_start_col <= end_col and merged_end_col >= start_col:
-                            try:
-                                sheet.merged_cells.remove(m_range)
-                            except ValueError:
-                                pass
-            # ===============================================================================
-
-        factories_all = [row.id for row in uf.get_data_from_query("SELECT id FROM tab_factories_d816_4")]
-        # reports_all = [row.id for row in uf.get_data_from_query("SELECT id FROM tab_type_reports_d816_4")]
-        reports_all_list = [value.get('index') for key, value in generating_report_settings.items()]
-
-        if factories_all and reports_all_list:
-            prepare_sheets(factories_all, ['_SET_ROW', '_INTERNAL_KEY'])
-            prepare_sheets(reports_all_list, ['_SUM_REP_SET_ROW', '_SUM_REP_INTERNAL_KEY'])
-        else:
-            return uf.get_msg_struct(uf.EnumMsg.SETTINGS_FOR_REPORT_NOT_FOUND)
-
-        path_template = str(Path(uf.main_folder) / Path(uf.file_folder))
-
-        base_template_dir = os.environ.get("TEMPLATE_DIR", path_template)
-
-        target_filename = f"{g_report_template_name}".lower()
-        target_path = os.path.join(base_template_dir, target_filename)
-
-        dir_to_create = os.path.dirname(target_path)
-        if not os.path.exists(dir_to_create):
-            try:
-                os.makedirs(dir_to_create, mode=0o755, exist_ok=True)
-            except PermissionError:
-                wb.close()
-                return uf.get_msg_struct(uf.EnumMsg.ERROR_PERMISSION_CREATE_DIR_LINUX, dir_to_create)
-
-        # Перезапись существующего файла шаблона
-        if os.path.exists(target_path) and not os.access(target_path, os.W_OK):
-            wb.close()
-            return uf.get_msg_struct(uf.EnumMsg.ERROR_PERMISSION_OVERWRITE_FILE)
-
-        # Сохранение файла
-        wb.save(target_path)
-        wb.close()
-
-        return uf.get_msg_struct(uf.EnumMsg.SUCCESS)
-
-    except Exception as e:
-        if 'wb' in locals():
-            wb.close()
-        return uf.get_msg_struct(uf.EnumMsg.ERROR_SAVE_OR_PROC_TEMPLATE, str(e))
-# ============================================================================================
-# ============================================================================================
+import logging
+# from flask_restx import abort
+#
+#
+# def insert_sheet_key_in_tab(input_data_key):
+#     db = uf.get_db_connection()
+#     output = io.StringIO()
+#     try:
+#         for row in input_data_key:
+#             # Извлекаем значения по ключам из вашего списка словарей
+#             output.write(f"{row['sheet_id']}\t{row['key_bs']}\n")
+#         output.seek(0)  # Возвращаем указатель в начало буфера для чтения
+#     except KeyError as e:
+#         # logger.warning(f"Ошибка в структуре входного списка input_data_key: отсутствует ключ {e}")
+#         abort(400, f"Неверный формат данных: отсутствует поле {e}")
+#
+#     # 2. Работа с базой данных
+#     try:
+#         # Автоматический COMMIT при успехе или ROLLBACK при любой ошибке
+#         with db.engine.begin() as conn:
+#             raw_conn = conn.connection.connection
+#             with raw_conn.cursor() as cursor:
+#                 # Создаем временную таблицу-черновик
+#                 cursor.execute("""
+#                     CREATE TEMP TABLE temp_staging (
+#                         sheet_id int,
+#                         key_bs int
+#                     ) ON COMMIT DROP;
+#                 """)
+#
+#                 # Загружаем ваш миллион строк в черновик (1-2 секунды)
+#                 cursor.copy_from(output, 'temp_staging', columns=('sheet_id', 'key_bs'))
+#
+#                 # Переносим данные в основную таблицу.
+#                 # Если строка уже есть — вызываем деление на ноль, что полностью откатит транзакцию.
+#                 cursor.execute("""
+#                     INSERT INTO tab_sheet_input_data_d816_4 (sheet_id, key_bs)
+#                     SELECT sheet_id, key_bs FROM temp_staging
+#                     ON CONFLICT (sheet_id, key_bs)
+#                     DO UPDATE SET sheet_id = 1 / 0;
+#                 """)
+#
+#         return {"status": "success", "message": "Вся пачка данных из миллиона строк успешно записана"}, 200
+#
+#     except (DataError, OperationalError) as e:
+#         # Если база поймала дубликат и сработало наше деление на ноль
+#         if "division by zero" in str(e).lower():
+#             # logger.warning("Вставка отменена: в списке обнаружены записи, которые уже есть в таблице.")
+#             abort(409, "Вставка отменена. Часть отправленных записей уже существует в базе данных.")
+#
+#         # logger.error(f"Ошибка типов данных PostgreSQL: {e}")
+#         abort(400, "Данные содержат неверные типы полей")
+#
+#     except Exception as e:
+#         # logger.error(f"Критическая ошибка сервера при массовой вставке: {e}")
+#         abort(500, "Внутренняя ошибка сервера при записи данных")
+#
+#     finally:
+#         # Освободить выделенную память
+#         output.close()

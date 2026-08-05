@@ -139,6 +139,10 @@ TABLES_MAP = {
     'post_zuv': {
         'tab_name': 'tab_post_zuv_d816_4',
         'fields': 'id, name'
+    },
+    'ei': {
+        'tab_name': 'tab_ei_d816_4',
+        'fields': 'id, name'
     }
 }
 

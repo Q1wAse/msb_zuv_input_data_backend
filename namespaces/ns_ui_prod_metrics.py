@@ -68,6 +68,7 @@ class ClsStructDataProdMetrics(Resource):
                 'data_type': uf.get_pagin_data('data_type_kao', '', 1, 100),
                 'versions': list(grouped.values()),
                 'years' : uf.get_pagin_data('view_year', '', 1, 100),
+                'ei': uf.get_pagin_data('ei', '', 1, 100),
                 'last_update' : uf.get_last_update(),
             }
 
@@ -160,7 +161,8 @@ flt_middle_volume_model = ns_ui_prod_metrics.model('FltMiddleVolume', {
     'product': fields.List(fields.Integer,description='Продукт', required=True),
     'sobstv': fields.List(fields.Integer,description='Собственник', required=False),
     'mest': fields.List(fields.Integer,description='Месторождение', required=False),
-    'post_zuv': fields.List(fields.Integer, description='Поставщик ЖУВ', required=False)
+    'post_zuv': fields.List(fields.Integer, description='Поставщик ЖУВ', required=False),
+    'ei': fields.List(fields.Integer, description='Единицы измерения', required=False),
 })
 
 flt_container_get_prod_metrics_model = ns_ui_prod_metrics.model('ContainerGetProdMetricsFlt', {
@@ -187,6 +189,7 @@ flt_container_get_prod_metrics_model = ns_ui_prod_metrics.model('ContainerGetPro
             'sobstv' : [1],
             'mest' : [32],
             'post_zuv' : [10],
+            'ei' : [1],
         }
     ),
     'filtertMiddleVolumeFrame2': fields.List(
@@ -198,6 +201,7 @@ flt_container_get_prod_metrics_model = ns_ui_prod_metrics.model('ContainerGetPro
             'sobstv' : [1],
             'mest' : [32],
             'post_zuv' : [0],
+            'ei' : [1]
         }
     ),
     'VariantColumns': fields.List(

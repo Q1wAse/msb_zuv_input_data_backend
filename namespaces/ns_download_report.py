@@ -217,7 +217,7 @@ class ClsDownloadTemplate(Resource):
 #==============================================================================================================================
 container_upload_report_template = reqparse.RequestParser()
 container_upload_report_template.add_argument(
-    "factory_id",
+    "report_id",
     type=str,
     required=True
 )
@@ -236,10 +236,10 @@ class ClsUploadTemplate(Resource):
 
             uf.clear_loc_log()
 
-            v_factory_id = uf.get_validate_param(param_list, "factory_id")
+            v_sheet_id = uf.get_validate_param(param_list, "report_id")
             v_file = uf.get_validate_param(param_list, "file")
 
-            return funcs_mirror.upload_report_template(v_factory_id,v_file)
+            return funcs_mirror.upload_report_template(v_sheet_id, v_file)
 
         except Exception as e:
             ns_download_report.abort(*errorhandler(e))
@@ -254,10 +254,10 @@ class ClsUploadReport(Resource):
 
             uf.clear_loc_log()
 
-            v_factory_id = uf.get_validate_param(param_list, "factory_id")
+            v_sheet_id = uf.get_validate_param(param_list, "report_id")
             v_file = uf.get_validate_param(param_list, "file")
 
-            return funcs_mirror.upload_report(v_factory_id,v_file)
+            return funcs_mirror.upload_report(v_sheet_id, v_file)
 
         except Exception as e:
             ns_download_report.abort(*errorhandler(e))
