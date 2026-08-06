@@ -1,5 +1,6 @@
 import sys, os, re, io, copy, openpyxl
 from datetime import datetime
+from psycopg2 import errors
 
 from flask import session, g, abort, send_file
 from sqlalchemy.exc import SQLAlchemyError, DataError, OperationalError
@@ -2111,6 +2112,22 @@ def fill_flat_data(
 
 # ============================================================================================
 def get_report_template(id):
+    input_data_list = [
+        {
+            'sheet_id': 1,
+            'key_bs': 1,
+        },
+        {
+            'sheet_id': 1,
+            'key_bs': 2,
+        },
+        {
+            'sheet_id': 1,
+            'key_bs': 3,
+        },
+    ]
+    insert_sheet_key_in_tab(input_data_list)
+    return { 'message': 's'}, 200
     template_name = g_report_template_name
     path_template = str(Path(uf.main_folder) / Path(uf.file_folder) / Path(template_name))
 
@@ -2399,63 +2416,98 @@ def upload_report(sheet_id: str, file_storage: FileStorage):
         return uf.get_msg_struct(uf.EnumMsg.ERROR_SAVE_OR_PROC_TEMPLATE, str(e))
 # ============================================================================================
 # ============================================================================================
-import logging
 # from flask_restx import abort
-#
-#
-# def insert_sheet_key_in_tab(input_data_key):
-#     db = uf.get_db_connection()
-#     output = io.StringIO()
-#     try:
-#         for row in input_data_key:
-#             # Извлекаем значения по ключам из вашего списка словарей
-#             output.write(f"{row['sheet_id']}\t{row['key_bs']}\n")
-#         output.seek(0)  # Возвращаем указатель в начало буфера для чтения
-#     except KeyError as e:
-#         # logger.warning(f"Ошибка в структуре входного списка input_data_key: отсутствует ключ {e}")
-#         abort(400, f"Неверный формат данных: отсутствует поле {e}")
-#
-#     # 2. Работа с базой данных
-#     try:
-#         # Автоматический COMMIT при успехе или ROLLBACK при любой ошибке
-#         with db.engine.begin() as conn:
-#             raw_conn = conn.connection.connection
-#             with raw_conn.cursor() as cursor:
-#                 # Создаем временную таблицу-черновик
-#                 cursor.execute("""
-#                     CREATE TEMP TABLE temp_staging (
-#                         sheet_id int,
-#                         key_bs int
-#                     ) ON COMMIT DROP;
-#                 """)
-#
-#                 # Загружаем ваш миллион строк в черновик (1-2 секунды)
-#                 cursor.copy_from(output, 'temp_staging', columns=('sheet_id', 'key_bs'))
-#
-#                 # Переносим данные в основную таблицу.
-#                 # Если строка уже есть — вызываем деление на ноль, что полностью откатит транзакцию.
-#                 cursor.execute("""
-#                     INSERT INTO tab_sheet_input_data_d816_4 (sheet_id, key_bs)
-#                     SELECT sheet_id, key_bs FROM temp_staging
-#                     ON CONFLICT (sheet_id, key_bs)
-#                     DO UPDATE SET sheet_id = 1 / 0;
-#                 """)
-#
-#         return {"status": "success", "message": "Вся пачка данных из миллиона строк успешно записана"}, 200
-#
-#     except (DataError, OperationalError) as e:
-#         # Если база поймала дубликат и сработало наше деление на ноль
-#         if "division by zero" in str(e).lower():
-#             # logger.warning("Вставка отменена: в списке обнаружены записи, которые уже есть в таблице.")
-#             abort(409, "Вставка отменена. Часть отправленных записей уже существует в базе данных.")
-#
-#         # logger.error(f"Ошибка типов данных PostgreSQL: {e}")
-#         abort(400, "Данные содержат неверные типы полей")
-#
-#     except Exception as e:
-#         # logger.error(f"Критическая ошибка сервера при массовой вставке: {e}")
-#         abort(500, "Внутренняя ошибка сервера при записи данных")
-#
-#     finally:
-#         # Освободить выделенную память
-#         output.close()
+from sqlalchemy import Table, MetaData
+
+from sqlalchemy.dialects.postgresql import insert
+
+def insert_sheet_key_in_tab(input_data_key):
+    db = uf.get_db_connection()
+
+    # Переносим данные из словаря в выделенную память, используя табуляцию
+    output = io.StringIO()
+    try:
+        for row in input_data_key:
+            output.write(f'{row["sheet_id"]}\t{row["key_bs"]}\n')
+        output.seek(0)
+    except KeyError as e:
+        abort(400, f'Неверный формат данных: отсутствует поле {e}')
+
+    try:
+        # with db.bind.begin() as conn:
+        #
+        #     conn.execute(text("""
+        #         CREATE TEMP TABLE temp_staging (
+        #             sheet_id int,
+        #             key_bs int
+        #         ) ON COMMIT DROP;
+        #     """))
+        #
+        #     conn.execute(
+        #         text("INSERT INTO temp_staging (sheet_id, key_bs) VALUES (:sheet_id, :key_bs);"),
+        #         input_data_key
+        #     )
+        #
+        #     conflict_count = conn.execute(text("""
+        #         SELECT COUNT(1)
+        #         FROM
+        #             (SELECT DISTINCT sheet_id, key_bs FROM temp_staging) t
+        #         JOIN tab_sheet_input_data_d816_4 main
+        #          ON main.sheet_id = t.sheet_id
+        #         AND main.key_bs = t.key_bs;
+        #     """)).scalar()
+        #
+        #     if conflict_count == 0:
+        #         conn.execute(text("""
+        #             INSERT INTO
+        #                 tab_sheet_input_data_d816_4 (sheet_id, key_bs)
+        #             SELECT DISTINCT
+        #                 sheet_id,
+        #                 key_bs
+        #             FROM temp_staging;
+        #         """))
+        #
+        #     conn.execute(text("""
+        #         INSERT INTO tab_sheet_input_data_d816_4 (sheet_id, key_bs)
+        #         SELECT DISTINCT sheet_id, key_bs FROM tmp_stag_tab_sheet_input_data_d816_4
+        #         ON CONFLICT ON CONSTRAINT tab_sheet_input_data_d816_4_index1
+        #         DO UPDATE SET sheet_id = 1 / 0;
+        #     """))
+
+        with db.bind.begin() as conn:
+            raw_conn = conn.connection.connection
+            with raw_conn.cursor() as cursor:
+                cursor.execute("""
+                    CREATE TEMP TABLE temp_staging (
+                        sheet_id int,
+                        key_bs int
+                    ) ON COMMIT DROP;
+                """)
+
+                cursor.copy_from(output, 'temp_staging', columns=('sheet_id', 'key_bs'))
+
+                cursor.execute("""
+                    INSERT INTO tab_sheet_input_data_d816_4
+                        (sheet_id, key_bs)
+                    SELECT
+                        sheet_id,
+                        key_bs
+                    FROM temp_staging
+                """)
+
+
+                # cursor.execute("""
+                #     INSERT INTO tab_sheet_input_data_d816_4
+                #         (sheet_id, key_bs)
+                #     VALUES ((1,1), (1,2), (1,3))
+                # """)
+
+        return True
+
+    except errors.UniqueViolation as e:
+        return False
+        # abort(500, str(e))
+
+    finally:
+        # Освободить выделенную память
+        output.close()

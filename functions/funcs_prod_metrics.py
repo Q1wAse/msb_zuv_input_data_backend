@@ -302,10 +302,13 @@ def convert_data_to_tab_front(result, key_name, reverse_diff=False):
         else:
             pct_value = 0.0
 
+        dict_total['variant1'] = round(dict_total['variant1'], 1)
+        dict_total['variant2'] = round(dict_total['variant2'], 1)
         dict_total['deviation'] = diff_value
         dict_total['percents'] = pct_value
         final_res.append(dict_total)
         # ==============================================================
+    final_res.sort(key=lambda row: (1 if 'name' not in row else 0, row.get('name', '')))
     return final_res
 #=======================================================================================================================
 
@@ -514,11 +517,53 @@ def get_exist_factories(tab_id):
                     res.append(new_row)
     return res
 #=======================================================================================================================
+def get_def_val_from_list(def_numb,fields_src_list,src,value_list):
+    for item in fields_src_list:
+        name = item.get('name')
+        if name == src:
+            value = item.get(def_numb,None)
+            if value:
+                for val in value_list:
+                    id = val.get('id', None)
+                    if id == value:
+                        return value
+    return None
+#=======================================================================================================================
 def get_exist_factory_collect(factory_id):
     db = uf.get_db_connection()
     res = {}
-    fields_src_list =['product','sobstv','mest','post_zuv', 'ei']
-    fields_list = [item for field in fields_src_list for item in (f'{field}_id', f'{field}_name')]
+    fields_src_list =[
+        {
+            'name': 'product',
+            'default1' : 31,
+            'default2' : 56,
+        },
+        {
+            'name': 'sobstv',
+            'default1' : None,
+            'default2' : None,
+        },
+        {
+            'name': 'mest',
+            'default1' : None,
+            'default2' : None,
+        },
+        {
+            'name': 'post_zuv',
+            'default1' : None,
+            'default2' : None,
+        },
+        {
+            'name': 'ei',
+            'default1' : 1,
+            'default2' : 1,
+        },
+    ]
+    fields_list = [
+        item
+        for field in fields_src_list
+        for item in (f"{field.get('name','')}_id", f"{field.get('name','')}_name")
+    ]
     fields_list.insert(0,'type_raspr')
     fields_str = """
         pererab.tab_type_raspr_d816_4_ids as {},
@@ -576,15 +621,23 @@ def get_exist_factory_collect(factory_id):
     # """)
     result = db.execute(sql_text).fetchall()
     if result:
-        uniq_dict_frame1 = defaultdict(list)
-        uniq_dict_frame2 = defaultdict(list)
+        uniq_dict_frame1 = defaultdict(lambda: defaultdict(int)) # defaultdict(list)
+        uniq_dict_frame2 = defaultdict(lambda: defaultdict(int)) # defaultdict(list)
+        for value in fields_src_list:
+            src = value.get('name','')
+            if src:
+                uniq_dict_frame1[src]['default'] = None
+                uniq_dict_frame1[src]['value'] = []
+                uniq_dict_frame2[src]['default'] = None
+                uniq_dict_frame2[src]['value'] = []
         for row in result:
             mapping = row._mapping
             type_raspr = mapping.get('type_raspr', None)
             row_data = defaultdict(dict)
             for db_key, db_value in mapping.items():
                 if db_key != 'type_raspr':
-                    for src in fields_src_list:
+                    for value in fields_src_list:
+                        src = value.get('name','')
                         if src in db_key:
                             suffix = db_key.rsplit('_', 1)[-1]
 
@@ -597,12 +650,45 @@ def get_exist_factory_collect(factory_id):
             for src, item_dict in row_data.items():
                 if 'id' in item_dict and 'name' in item_dict and item_dict.get('id', 0) != 0:
                     if type_raspr == 5: # Переработка
-                        if item_dict not in uniq_dict_frame1[src]:
-                            uniq_dict_frame1[src].append(item_dict)
-                    elif type_raspr == 7: # Производство
-                        if item_dict not in uniq_dict_frame2[src]:
-                            uniq_dict_frame2[src].append(item_dict)
+                        if item_dict not in uniq_dict_frame1[src]['value']:
+                            uniq_dict_frame1[src]['value'].append(item_dict)
 
+                            # uniq_dict_frame1[src].append(
+                            #     {
+                            #         'default' : next(
+                            #             (item['default'] for item in fields_src_list if item['name'] == src), None
+                            #         ),
+                            #         'value' : item_dict
+                            #     }
+                            # )
+                    elif type_raspr == 7: # Производство
+                        if item_dict not in uniq_dict_frame2[src]['value']:
+                            uniq_dict_frame2[src]['value'].append(item_dict)
+                            # uniq_dict_frame2[src].append(
+                            #     {
+                            #         'default' : next(
+                            #             (item['default'] for item in fields_src_list if item['name'] == src), None
+                            #         ),
+                            #         'value' : item_dict
+                            #     }
+                            # )
+        for value in fields_src_list:
+            src = value.get('name', '')
+            if src:
+                uniq_dict_frame1[src]['value'].sort(key=lambda row: row.get('name',''))
+                uniq_dict_frame1[src]['default'] = get_def_val_from_list(
+                    'default1',
+                    fields_src_list,
+                    src,
+                    uniq_dict_frame1[src]['value']
+                )
+                uniq_dict_frame2[src]['value'].sort(key=lambda row: row.get('name',''))
+                uniq_dict_frame2[src]['default'] = get_def_val_from_list(
+                    'default2',
+                    fields_src_list,
+                    src,
+                    uniq_dict_frame2[src]['value']
+                )
         res = {
              'panel_middle_month_volume_frame1_filter' : uniq_dict_frame1,
              'panel_middle_month_volume_frame2_filter' : uniq_dict_frame2
