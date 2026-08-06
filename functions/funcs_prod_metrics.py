@@ -269,7 +269,6 @@ def convert_data_to_tab_front(result, key_name, reverse_diff=False):
             )
         for res in result:
             final_res.append({
-                # 'name' : key_name_list.get(res.get(key_name, ''), ''),
                 'name' : next((item for item in key_name_list if item.get('id') == res.get(key_name, '')), {}).get('name', ''),
                 'variant1' : res.get('variant1', 0.0),
                 'variant2' : res.get('variant2', 0.0),
@@ -450,8 +449,8 @@ def get_calc_volume(
                     base_val = v1_val
                 res.append({
                     data_slice : mapping.get(data_slice, None),
-                    'variant1' : v1_val,
-                    'variant2' : v2_val,
+                    'variant1' : round(v1_val, 1),
+                    'variant2' : round(v2_val, 1),
                     'deviation' : round(diff_value,1),
                     'percents' : round((diff_value / base_val) * 100, 1) if base_val != 0 else 0.0,
                 })
