@@ -129,6 +129,35 @@ generating_report_settings = {
 
 
 # ============================================================================================
+def get_type_reports_list():
+    db = uf.get_db_connection()
+    list = []
+    try:
+
+        result = db.execute(text("""
+            SELECT
+                sheet_id as id,
+                name_display as name,
+                upload::boolean
+            FROM
+                tab_sheet_id_list_d816_4
+            WHERE
+                TYPE_SHEET = 'REPORT'
+            ORDER BY
+                sheet_id
+        """)).mappings()
+        for row in result:
+            res = {}
+            for key, value in row.items():
+                if key == 'upload' and value is None:
+                    pass
+                else:
+                    res[key] = value
+            list.append(res)
+    except Exception as e:
+        return list
+    return list
+# ============================================================================================
 def get_row_list_msb_zuv_d816_4(
         year: int,
         ver_plan: int,
