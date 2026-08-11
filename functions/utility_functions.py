@@ -63,7 +63,7 @@ msg_list = {
     EnumMsg.ERROR_PERMISSION_OVERWRITE_FILE: {'code': 500, 'is_err': True,
                                               'msg': 'Нет прав на перезапись существующего файла шаблона'},
     EnumMsg.ERROR_VALID_NEW_TEMPLATE: {'code': 500, 'is_err': True,
-                                       'msg': 'Загружаемый шаблон не подходит для обработки'},
+                                       'msg': 'Загружаемый файл не подходит для обработки. Нет настроек или отсутствует лист: %'},
 }
 
 

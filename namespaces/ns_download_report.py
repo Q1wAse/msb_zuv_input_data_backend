@@ -22,7 +22,7 @@ import msb_zuv_input_data_backend.functions.funcs_mirror as funcs_mirror
 
 #==============================================================================================================================
 #==============================================================================================================================
-ns_download_report = Namespace('ns_download_report', description='download report')
+ns_download_report = Namespace('ns_download_report', description='Формирование зеркальных форм. Ввод данных в зеркальные формы. Изменение шаблона зеркальных форм')
 #==============================================================================================================================
 #==============================================================================================================================
 # container_download_report = reqparse.RequestParser()
@@ -194,7 +194,7 @@ class ClsStructDataDownloadReport(Resource):
 #==============================================================================================================================
 container_get_report_template = reqparse.RequestParser()
 container_get_report_template.add_argument(
-    "factory_id",
+    "sheet_id",
     type=str,
     required=True
 )
@@ -207,7 +207,7 @@ class ClsDownloadTemplate(Resource):
 
             uf.clear_loc_log()
 
-            v_factory_id = uf.get_validate_param(param_list, "factory_id")
+            v_factory_id = uf.get_validate_param(param_list, "sheet_id")
 
             return funcs_mirror.get_report_template(v_factory_id)
 
@@ -217,7 +217,7 @@ class ClsDownloadTemplate(Resource):
 #==============================================================================================================================
 container_upload_report_template = reqparse.RequestParser()
 container_upload_report_template.add_argument(
-    "report_id",
+    "sheet_id",
     type=str,
     required=True
 )
@@ -236,7 +236,7 @@ class ClsUploadTemplate(Resource):
 
             uf.clear_loc_log()
 
-            v_sheet_id = uf.get_validate_param(param_list, "report_id")
+            v_sheet_id = uf.get_validate_param(param_list, "sheet_id")
             v_file = uf.get_validate_param(param_list, "file")
 
             return funcs_mirror.upload_report_template(v_sheet_id, v_file)
@@ -254,7 +254,7 @@ class ClsUploadReport(Resource):
 
             uf.clear_loc_log()
 
-            v_sheet_id = uf.get_validate_param(param_list, "report_id")
+            v_sheet_id = uf.get_validate_param(param_list, "sheet_id")
             v_file = uf.get_validate_param(param_list, "file")
 
             return funcs_mirror.upload_report(v_sheet_id, v_file)

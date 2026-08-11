@@ -652,26 +652,9 @@ def get_exist_factory_collect(factory_id):
                     if type_raspr == 5: # Переработка
                         if item_dict not in uniq_dict_frame1[src]['value']:
                             uniq_dict_frame1[src]['value'].append(item_dict)
-
-                            # uniq_dict_frame1[src].append(
-                            #     {
-                            #         'default' : next(
-                            #             (item['default'] for item in fields_src_list if item['name'] == src), None
-                            #         ),
-                            #         'value' : item_dict
-                            #     }
-                            # )
                     elif type_raspr == 7: # Производство
                         if item_dict not in uniq_dict_frame2[src]['value']:
                             uniq_dict_frame2[src]['value'].append(item_dict)
-                            # uniq_dict_frame2[src].append(
-                            #     {
-                            #         'default' : next(
-                            #             (item['default'] for item in fields_src_list if item['name'] == src), None
-                            #         ),
-                            #         'value' : item_dict
-                            #     }
-                            # )
         for value in fields_src_list:
             src = value.get('name', '')
             if src:
