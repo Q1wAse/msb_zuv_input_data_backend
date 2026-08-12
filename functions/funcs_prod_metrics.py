@@ -375,16 +375,28 @@ def get_calc_volume(
     type_raspr_list = [int(item) for item in type_raspr]
 
     factory_list = [int(item) for item in selected_factories]
-    var_plans_list = [
-        int(item.get("variantPlaning", 0))
-        for idx, item in enumerate(variant_columns, start=1)
-        if str(idx) in selected_variant_compare
-    ]
-    years_list = [
-        int(item.get("year", 0))
-        for idx, item in enumerate(variant_columns, start=1)
-        if str(idx) in selected_variant_compare
-    ]
+
+    var_plans_list = []
+    for item in selected_variant_compare:
+        idx = int(item) - 1
+        if 0 <= idx < len(variant_columns):
+            var_plans_list.append(variant_columns[idx].get("variantPlaning", 0))
+    # var_plans_list = [
+    #     int(item.get("variantPlaning", 0))
+    #     for idx, item in enumerate(variant_columns, start=1)
+    #     if str(idx) in selected_variant_compare
+    # ]
+
+    # years_list = [
+    #     int(item.get("year", 0))
+    #     for idx, item in enumerate(variant_columns, start=1)
+    #     if str(idx) in selected_variant_compare
+    # ]
+    years_list = []
+    for item in selected_variant_compare:
+        idx = int(item) - 1
+        if 0 <= idx < len(variant_columns):
+            years_list.append(variant_columns[idx].get("year", 0))
 
     query_params['type_raspr'] = type_raspr_list
     if ei != None:
