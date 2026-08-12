@@ -111,7 +111,7 @@ def get_tab_name_check(name):
                     return tab_name
     return ''
 #=======================================================================================================================
-def convert_data_to_tab_front_old(result, key_name, reverse_diff=False):
+def convert_data_to_tab_front_old(result, key_name, reverse_diff=True):
     db = uf.get_db_connection()
     final_res = []
     key_list = []
@@ -234,7 +234,7 @@ def get_list_percent_from_lists(list_base,list_slice):
                 })
     return result
 #=======================================================================================================================
-def convert_data_to_tab_front(result, key_name, reverse_diff=False):
+def convert_data_to_tab_front(result, key_name, reverse_diff=True):
     db = uf.get_db_connection()
     final_res = []
     key_list = []
@@ -321,7 +321,7 @@ def get_calc_volume(
         selected_factories,
         variant_columns,
         ei=None,
-        reverse_diff=False
+        reverse_diff=True
 ):
     mapping_col = {
         'product': 'tab_product_d816_4_ids',
@@ -376,27 +376,31 @@ def get_calc_volume(
 
     factory_list = [int(item) for item in selected_factories]
 
-    var_plans_list = []
-    for item in selected_variant_compare:
-        idx = int(item) - 1
-        if 0 <= idx < len(variant_columns):
-            var_plans_list.append(variant_columns[idx].get("variantPlaning", 0))
-    # var_plans_list = [
-    #     int(item.get("variantPlaning", 0))
-    #     for idx, item in enumerate(variant_columns, start=1)
-    #     if str(idx) in selected_variant_compare
-    # ]
+    # var_plans_list = []
+    # for item in selected_variant_compare:
+    #     idx = int(item) - 1
+    #     if 0 <= idx < len(variant_columns):
+    #         var_plans_list.append(variant_columns[idx].get("variantPlaning", 0))
 
-    # years_list = [
-    #     int(item.get("year", 0))
-    #     for idx, item in enumerate(variant_columns, start=1)
-    #     if str(idx) in selected_variant_compare
-    # ]
-    years_list = []
-    for item in selected_variant_compare:
-        idx = int(item) - 1
-        if 0 <= idx < len(variant_columns):
-            years_list.append(variant_columns[idx].get("year", 0))
+    # years_list = []
+    # for item in selected_variant_compare:
+    #     idx = int(item) - 1
+    #     if 0 <= idx < len(variant_columns):
+    #         years_list.append(variant_columns[idx].get("year", 0))
+
+    var_plans_list = [
+        int(item.get("variantPlaning", 0))
+        for idx, item in enumerate(variant_columns, start=1)
+        if str(idx) in selected_variant_compare
+    ]
+
+    years_list = [
+        int(item.get("year", 0))
+        for idx, item in enumerate(variant_columns, start=1)
+        if str(idx) in selected_variant_compare
+    ]
+
+
 
     query_params['type_raspr'] = type_raspr_list
     if ei != None:
