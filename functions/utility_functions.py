@@ -55,7 +55,7 @@ msg_list = {
     EnumMsg.INCORRECT_TEMPLATE_NAME: {'code': 400, 'is_err': True, 'msg': 'Некорректное наименование шаблона'},
     EnumMsg.NO_SELECTED_COLUMNS: {'code': 400, 'is_err': True, 'msg': 'Должен быть выбран хотя бы один столбец'},
     EnumMsg.SETTINGS_FOR_REPORT_NOT_FOUND: {'code': 400, 'is_err': True,
-                                            'msg': 'Не удалось найти настройки для выбранных отчётов из таблицы: "tab_factories_d816_4"'},
+                                            'msg': 'Не удалось найти настройки для выбранных отчётов из таблицы: "tab_sheet_id_list_d816_4"'},
     EnumMsg.ERROR_OPEN_TEMPLATE: {'code': 400, 'is_err': True, 'msg': 'Не удалось прочитать, как XLSX, файл: %'},
     EnumMsg.ERROR_SAVE_OR_PROC_TEMPLATE: {'code': 500, 'is_err': True, 'msg': 'Ошибка при обработке или сохранении: %'},
     EnumMsg.ERROR_PERMISSION_CREATE_DIR_LINUX: {'code': 500, 'is_err': True,
@@ -448,12 +448,24 @@ def map_pg_to_frontend(pg_type):
 # ============================================================================================
 def get_data_from_query(sql_text, param=None):
     db = get_db_connection()
-    if db:
-        if param:
-            return db.execute(text(sql_text), param).fetchall()
-        else:
-            return db.execute(text(sql_text)).fetchall()
-    return []
+    if not db:
+        return []
+
+    try:
+        return db.execute(text(sql_text), param or {}).fetchall()
+    except Exception as e:
+        return []
+# ============================================================================================
+def get_dict_data_from_query(sql_text, param=None):
+    db = get_db_connection()
+    if not db:
+        return []
+
+    try:
+        result = db.execute(text(sql_text), param or {}).mappings()
+        return [dict(row) for row in result]
+    except Exception as e:
+        return []
 # ============================================================================================
 def get_struct_table(key_tab):
     db = get_db_connection()

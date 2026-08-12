@@ -778,24 +778,48 @@ def get_calculated_dataset(selected_variant_compare,
                 selected_factories,
                 variant_columns,
                 ei=1, ),  # тыс тонн (Единица измерения)
-            'panel_lower_month_volume_tab1': convert_data_to_tab_front(get_calc_volume(
-                'tab_product_d816_4_ids',
-                [],  # Газ
-                [7],  # Производство
-                {},
-                selected_variant_compare,
-                selected_factories,
-                variant_columns,
-                ei=1, ), 'tab_product_d816_4_ids'),
-            'panel_lower_month_volume_tab2': convert_data_to_tab_front(get_calc_volume(
-                'tab_product_d816_4_ids',
-                [],  # Газ
-                [5],  # Производство
-                {},
-                selected_variant_compare,
-                selected_factories,
-                variant_columns,
-                ei=1, ), 'tab_product_d816_4_ids'),
+            'panel_lower_month_volume_tab1': {
+                'ton' :
+                    convert_data_to_tab_front(get_calc_volume(
+                        'tab_product_d816_4_ids',
+                        [],  # Газ
+                        [7],  # Производство
+                        {},
+                        selected_variant_compare,
+                        selected_factories,
+                        variant_columns,
+                        ei=1, ), 'tab_product_d816_4_ids'),
+                'cube':
+                    convert_data_to_tab_front(get_calc_volume(
+                        'tab_product_d816_4_ids',
+                        [],  # Газ
+                        [7],  # Производство
+                        {},
+                        selected_variant_compare,
+                        selected_factories,
+                        variant_columns,
+                        ei=2, ), 'tab_product_d816_4_ids'),
+            },
+            'panel_lower_month_volume_tab2': {
+                'ton' : convert_data_to_tab_front(get_calc_volume(
+                    'tab_product_d816_4_ids',
+                    [],  # Газ
+                    [5],  # Переработка
+                    {},
+                    selected_variant_compare,
+                    selected_factories,
+                    variant_columns,
+                    ei=1, ), 'tab_product_d816_4_ids'),
+                'cube': convert_data_to_tab_front(get_calc_volume(
+                    'tab_product_d816_4_ids',
+                    [],  # Газ
+                    [5],  # Переработка
+                    {},
+                    selected_variant_compare,
+                    selected_factories,
+                    variant_columns,
+                    ei=2, ), 'tab_product_d816_4_ids'),
+            }
         }
         if len(selected_factories) == 1:
             collection.update(get_exist_factory_collect(selected_factories[0]))

@@ -1,4 +1,4 @@
-import sys, os, re, io, copy, openpyxl
+import sys, os, re, io, copy, traceback, openpyxl
 from datetime import datetime
 from psycopg2 import errors
 
@@ -121,10 +121,10 @@ template_setups = [
 
 generating_report_settings = {
     # ключ в "Таблица Типы отчётов" | index - индекс именованного диапазона
-    '1': {'index': '1'},  # План общий
-    '2': {'index': '4'},  # Факт общий
-    '3': {'index': '2'},  # Баланс ЗС
-    '5': {'index': '3'},  # ЕЖО
+    '19': {'index': '1'},  # План общий
+    '20': {'index': '4'},  # Факт общий
+    '21': {'index': '2'},  # Баланс ЗС
+    '23': {'index': '3'},  # ЕЖО
 }
 
 
@@ -288,6 +288,9 @@ def get_data_from_named_range(wb, named_range):
             min_col, min_row, max_col, max_row = range_boundaries(cell_coordinates)
         if sheet_name in wb.sheetnames:
             sheet = wb[sheet_name]
+        if sheet_name == '':
+            sheet = wb[wb.sheetnames[named_range.localSheetId]]
+            sheet_name = sheet.title
     except Exception as e:
         return {'Exec': False}
     return {
@@ -299,8 +302,26 @@ def get_data_from_named_range(wb, named_range):
         'max_col': max_col,
         'max_row': max_row
     }
+# KIVA
+def get_named_range_from_sheet_id_and_nr_name(wb, sheet_id, partial_named_range_name):
+    sheet = None
+    min_col, min_row, max_col, max_row = 0, 0, 0, 0
+    sheet_name = ''
+    try:
+        sheet = get_sheet_from_sheet_id(wb, sheet_id)
+        sheet_name = sheet.title
+        for item in wb.defined_names:
+            if partial_named_range_name in item:
+                named_range = wb.defined_names[item]
+                for sheet_name2, cell_coordinates in named_range.destinations:
+                    min_col, min_row, max_col, max_row = range_boundaries(cell_coordinates)
+                if sheet_name2 == sheet_name:
+                    return named_range
 
-def get_named_rng_partial_name(wb, sheet_name, partial_name):
+    except Exception as e:
+        return None
+    return None
+def get_named_rng_partial_name(wb, partial_name):
     """
         Возвращает именованный диапазон по первому вхождению его имени из списка именованных диапазонов
     """
@@ -309,11 +330,10 @@ def get_named_rng_partial_name(wb, sheet_name, partial_name):
         if partial_name in item:
             return wb.defined_names[item]
     # поиск в зоне видимости ЛИСТ
-    if sheet_name in wb.sheetnames:
-        for sheet in wb.sheetnames:
-            for item in sheet.defined_names:
-                if partial_name in item:
-                    return sheet.defined_names[item]
+    for sheet_name in wb.sheetnames:
+        for item in wb[sheet_name].defined_names:
+            if partial_name in item:
+                return wb[sheet_name].defined_names[item]
     return None
 def get_sheet_id_from_sheet(sheet):
     sheet_name = sheet.title
@@ -321,6 +341,17 @@ def get_sheet_id_from_sheet(sheet):
         for item in sheet.defined_names:
             if '_SHEET_ID' in item:
                 return item.replace('_SHEET_ID','')
+    except Exception as e:
+        pass
+    return None
+def get_sheet_from_sheet_id(wb,sheet_id):
+    try:
+        for sheet_name in wb.sheetnames:
+            sheet = wb[sheet_name]
+            if sheet:
+                for item in sheet.defined_names:
+                    if f'_SHEET_ID{sheet_id}' == item:
+                        return sheet
     except Exception as e:
         pass
     return None
@@ -337,7 +368,7 @@ def get_common_column_settings(start_col_index):
 def SplitInternalKey(value):
     try:
         parts = str(value).split(':')[::-1]
-        var_planing = parts[0]
+        var_planing = parts[0] if str(parts[0]).lower() != 'none' else '0'
         data_type = parts[1]
         quarter = -1
         month = -1
@@ -546,6 +577,20 @@ def main_download_report(download_type, selected_factories, selected_reports, sr
 
     storage_sheet = defaultdict(lambda: defaultdict(dict))
 
+    SHEETS_SETTINGS = uf.get_dict_data_from_query("""
+        SELECT
+            sheet_id,
+            name_sheet,
+            name_display,
+            upload,
+            type_sheet,
+            type_generation
+        FROM
+            tab_sheet_id_list_d816_4
+    """)
+    if not SHEETS_SETTINGS:
+        return uf.get_msg_struct(uf.EnumMsg.SETTINGS_FOR_REPORT_NOT_FOUND)
+
     month = {
         1: 'январь',
         2: 'февраль',
@@ -579,9 +624,9 @@ def main_download_report(download_type, selected_factories, selected_reports, sr
 
     generating_type = {
         'NeedGeneratingReport': bool(selected_factories or (any(item in selected_reports for item in
-                                                                ['1', '2', '3', '5']
+                                                                ['19', '20', '21', '23']
                                                                 ))),
-        'NeedStaticReport': any(item in selected_reports for item in ['4']),
+        'NeedStaticReport': any(item in selected_reports for item in ['22']),
     }
 
     if len_src_columns > 1:
@@ -1695,12 +1740,7 @@ def main_download_report(download_type, selected_factories, selected_reports, sr
     if generating_type.get('NeedGeneratingReport', False):
         # generating_report_settings = {
         # # ключ в "Таблица Типы отчётов" | index - индекс именованного диапазона
-        #     '1': {'index': '1'}, # План общий
-        #     '2': {'index': '4'}, # Факт общий
-        #     '3': {'index': '2'}, # Баланс ЗС
-        #     '5': {'index': '3'}, # ЕЖО
-        # }
-        # reports_all_list = list(generating_report_settings.keys())
+
         reports_all_list = reports_all_list = [value.get('index') for key, value in generating_report_settings.items()]
         selected_index_report = [
             generating_report_settings[report_id]['index']
@@ -1719,7 +1759,7 @@ def main_download_report(download_type, selected_factories, selected_reports, sr
 
     if generating_type.get('NeedStaticReport', False):
         static_report_settings = {
-            '4': {  # Отчёт КПД ДО
+            '22': {  # Отчёт КПД ДО
                 'SET_ROW': '_STATIC_REP_SET_ROW1',
                 'INTERNAL_KEY': '_STATIC_REP_INTERNAL_KEY1',
             }
@@ -2349,19 +2389,17 @@ def get_report_template(id):
     # Получаем рабочую книгу из шаблона
     wb = openpyxl.load_workbook(path_template)
 
-    factories_all = [row.id for row in uf.get_data_from_query("SELECT id FROM tab_factories_d816_4")]
-    for factory_id in factories_all:
+    sheet_id_all = [row.id for row in uf.get_data_from_query("SELECT sheet_id as id FROM tab_sheet_id_list_d816_4")]
+    for loc_sheet_id in sheet_id_all:
         try:
-            def_range_bs = wb.defined_names[f'_SET_ROW{factory_id}']
+            sheet = get_sheet_from_sheet_id(wb,loc_sheet_id)
+            if sheet:
+                if id != str(loc_sheet_id):
+                    sheet.sheet_state = 'veryHidden'
+                else:
+                    sheet.sheet_state = 'visible'
         except Exception as e:
             continue
-        for sheet_name_rng_bs, cell_coordinates_rng_bs in def_range_bs.destinations:
-            sheet = wb[sheet_name_rng_bs]
-            if id != str(factory_id):
-                sheet.sheet_state = 'veryHidden'
-                continue
-
-            sheet.sheet_state = 'visible'
 
     # Создаём буфер для наполнения
     buffer = io.BytesIO()
@@ -2478,35 +2516,38 @@ def upload_report_template(sheet_id: str, file_storage: FileStorage):
         def check_this_sheet_id_template(loc_sheet_id):
             # ==========================================================================================================
             # SHEET_ID
-            nr_sheet_id = get_data_from_named_range_name(wb, f'_SHEET_ID{loc_sheet_id}')
-            if nr_sheet_id.get('Exec', False) == False:
+            sheet_id_data = get_data_from_named_range_name(wb, f'_SHEET_ID{loc_sheet_id}')
+            if sheet_id_data.get('Exec', False) == False:
                 return False
             # ==========================================================================================================
-            nr_sheet_id_sheet_name = nr_sheet_id.get('sheet_name')
+            nr_sheet_id_sheet_name = sheet_id_data.get('sheet_name')
             # Именованная диапазоны, которые должны быть обязаны на каждом вычислительном листе
-            _set_row = get_named_rng_partial_name(wb, nr_sheet_id_sheet_name, '_SET_ROW')
-            _internal_key = get_named_rng_partial_name(wb, nr_sheet_id_sheet_name, '_INTERNAL_KEY')
+            # _set_row = get_named_rng_partial_name(wb, '_SET_ROW')
+            # _internal_key = get_named_rng_partial_name(wb, '_INTERNAL_KEY')
+            nr_set_row = get_named_range_from_sheet_id_and_nr_name(wb, loc_sheet_id, '_SET_ROW')
+            nr_internal_key = get_named_range_from_sheet_id_and_nr_name(wb, loc_sheet_id, '_INTERNAL_KEY')
 
-            if _set_row is None or _internal_key is None:
+
+            if nr_set_row is None or nr_internal_key is None:
                 return False
-            nr_set_row = get_data_from_named_range(wb, _set_row)
-            nr_internal_key = get_data_from_named_range(wb, _internal_key)
+            _set_row_data = get_data_from_named_range(wb, nr_set_row)
+            _internal_key_data = get_data_from_named_range(wb, nr_internal_key)
 
             sheet_name_set_row = nr_sheet_id_sheet_name
-            set_row_left_col_index = nr_set_row.get('min_col')
-            set_row_right_col_index = nr_set_row.get('max_col')
-            sheet = nr_sheet_id.get('sheet')
+            set_row_left_col_index = _set_row_data.get('min_col')
+            set_row_right_col_index = _set_row_data.get('max_col')
+            sheet = sheet_id_data.get('sheet')
 
             # sheet.sheet_state = 'veryHidden'
 
-            FirstRowData = nr_internal_key.get('min_row')
+            FirstRowData = _internal_key_data.get('min_row')
             first_row = FirstRowData - 3  # всего строк для заголовков 3
             FirstRowData += 1
             last_row = sheet.max_row
 
 
             # ==========================================================================================================
-            if loc_sheet_id != 21: # 21 - ключ для "Отчет по КПД ДО" у него статичные столбцы
+            if loc_sheet_id != 22: # 22 - ключ для "Отчет по КПД ДО" у него статичные столбцы
                 start_col = set_row_right_col_index + 2
                 end_col = sheet.max_column + 1
                 amount_col = end_col - start_col
@@ -2550,55 +2591,59 @@ def upload_report_template(sheet_id: str, file_storage: FileStorage):
                             pass
                 # ======================================================================================================
                 # Процесс генерации ключей для ввода данных
-                columns_settings = get_common_column_settings(set_row_left_col_index)
-                dict_exists_key_input = []
-                dict_new_key_input = []
-                dict_input_data_tab = []
-                for i in range(FirstRowData, last_row+1):
-                    cell_key_input = sheet.cell(row=i, column=columns_settings[EnumColumnSettings.KEY_INPUT])
-                    cell_key_bs = sheet.cell(row=i, column=columns_settings[EnumColumnSettings.KEY_BS])
-                    cell_formula_month = sheet.cell(row=i, column=columns_settings[EnumColumnSettings.FORMULA_MONTH])
-                    if cell_key_input.value is not None:
-                        dict_exists_key_input.append(cell_key_input.value)
-                    elif cell_key_input.value is None and cell_key_bs.value is None and cell_formula_month.value is None:
-                        # Если ключ для ввода пустой и нет ключа для статьи и нет ключа для месяца, то
-                        dict_new_key_input.append(
-                            {
-                                'cell' : cell_key_input,
-                                'key_bs' : None,
-                            }
-                        )
+                if loc_sheet_id == 21: # 21 - Генерация пока что только для отчёта Баланс ЗС
+                    columns_settings = get_common_column_settings(set_row_left_col_index)
+                    dict_exists_key_input = []
+                    dict_new_key_input = []
+                    dict_input_data_tab = []
+                    for i in range(FirstRowData, last_row+1):
+                        cell_key_input = sheet.cell(row=i, column=columns_settings[EnumColumnSettings.KEY_INPUT])
+                        cell_key_bs = sheet.cell(row=i, column=columns_settings[EnumColumnSettings.KEY_BS])
+                        cell_formula_month = sheet.cell(row=i, column=columns_settings[EnumColumnSettings.FORMULA_MONTH])
+                        if cell_key_input.value is not None:
+                            dict_exists_key_input.append(cell_key_input.value)
+                        elif cell_key_input.value is None and cell_key_bs.value is None and cell_formula_month.value is None:
+                            # Если ключ для ввода пустой и нет ключа для статьи и нет ключа для месяца, то
+                            dict_new_key_input.append(
+                                {
+                                    'cell' : cell_key_input,
+                                    'key_bs' : None,
+                                }
+                            )
 
-                # генерируем ключи для ввода данных, если есть пустые ячейки для ключа "ввод данных"
-                if dict_new_key_input:
-                    next_value = max(dict_exists_key_input, default=0)
-                    for item in dict_new_key_input:
-                        next_value += 1
-                        item['key_bs'] = next_value
-                        dict_input_data_tab.append(
-                            {
-                                'sheet_id' : loc_sheet_id,
-                                'key_bs' : item['key_bs'],
-                            }
-                        )
-                # Если есть сгенерированные ключи, то попробуем их записать в БД
-                if dict_input_data_tab:
-                    dict_main_input_data_tab[loc_sheet_id] = {
-                        'dict_input_data_tab' : dict_input_data_tab,
-                        'dict_new_key_input' : dict_new_key_input
-                    }
+                    # генерируем ключи для ввода данных, если есть пустые ячейки для ключа "ввод данных"
+                    if dict_new_key_input:
+                        next_value = max(dict_exists_key_input, default=0)
+                        for item in dict_new_key_input:
+                            next_value += 1
+                            item['key_bs'] = next_value
+                            dict_input_data_tab.append(
+                                {
+                                    'sheet_id' : loc_sheet_id,
+                                    'key_bs' : item['key_bs'],
+                                }
+                            )
+                    # Если есть сгенерированные ключи, то попробуем их записать в БД
+                    if dict_input_data_tab:
+                        dict_main_input_data_tab[loc_sheet_id] = {
+                            'dict_input_data_tab' : dict_input_data_tab,
+                            'dict_new_key_input' : dict_new_key_input
+                        }
                 # ======================================================================================================
             else:
                 pass
             return True
 
-        # sheet_id_all = [{'id' : row.id, 'name' : row.name }for row in uf.get_data_from_query("SELECT id, name FROM tab_sheet_id_list_d816_4")]
+        # sheet_id_all = [{'id' : row.sheet_id, 'name' : row.name_sheet }for row in uf.get_data_from_query("SELECT sheet_id, name_sheet FROM tab_sheet_id_list_d816_4")]
+        # sheet_id_all = [
+        #     { 'id' : 1, 'name' : 'sheet 1' },
+        #     { 'id' : 2, 'name' : 'sheet 2' },
+        #     { 'id' : 20, 'name' : 'sheet 20' },
+        #     { 'id' : 21, 'name' : 'sheet 21' },
+        #     { 'id' : 22, 'name' : 'sheet 22' },
+        # ]
         sheet_id_all = [
-            { 'id' : 1, 'name' : 'sheet 1' },
-            { 'id' : 2, 'name' : 'sheet 2' },
-            { 'id' : 20, 'name' : 'sheet 20' },
-            { 'id' : 21, 'name' : 'sheet 21' },
-            { 'id' : 22, 'name' : 'sheet 22' },
+            {'id': 21, 'name': 'Баланс ЗС'}, # 21 -Генерация пока что только для Баланс ЗС
         ]
 
         dict_main_input_data_tab = {}
@@ -2642,7 +2687,17 @@ def upload_report_template(sheet_id: str, file_storage: FileStorage):
     except Exception as e:
         if 'wb' in locals():
             wb.close()
-        return uf.get_msg_struct(uf.EnumMsg.ERROR_SAVE_OR_PROC_TEMPLATE, str(e))
+
+        _, _, exc_tb = sys.exc_info()
+        tb_info = traceback.extract_tb(exc_tb)[-1]
+
+        error_msg = (
+            f"Error: {e} | "
+            f"File: {tb_info.filename} | "
+            f"Line: {tb_info.lineno} | "
+            f"Func: {tb_info.name}"
+        )
+        return uf.get_msg_struct(uf.EnumMsg.ERROR_SAVE_OR_PROC_TEMPLATE, error_msg)
 # ============================================================================================
 # ============================================================================================
 def upload_report(sheet_id: str, file_storage: FileStorage):
@@ -2667,8 +2722,11 @@ def upload_report(sheet_id: str, file_storage: FileStorage):
             # ==========================================================================================================
             nr_sheet_id_sheet_name = nr_sheet_id.get('sheet_name')
             # Именованная диапазоны, которые должны быть обязаны на каждом вычислительном листе
-            _set_row = get_named_rng_partial_name(wb, nr_sheet_id_sheet_name, '_SET_ROW')
-            _internal_key = get_named_rng_partial_name(wb, nr_sheet_id_sheet_name, '_INTERNAL_KEY')
+            # _set_row = get_named_rng_partial_name(wb, '_SET_ROW')
+            # _internal_key = get_named_rng_partial_name(wb, '_INTERNAL_KEY')
+
+            _set_row = get_named_range_from_sheet_id_and_nr_name(wb, loc_sheet_id, '_SET_ROW')
+            _internal_key = get_named_range_from_sheet_id_and_nr_name(wb, loc_sheet_id, '_INTERNAL_KEY')
 
             if _set_row is None or _internal_key is None:
                 return False
@@ -2690,7 +2748,7 @@ def upload_report(sheet_id: str, file_storage: FileStorage):
 
 
             # ==========================================================================================================
-            if loc_sheet_id != 21:  # 21 - ключ для "Отчет по КПД ДО" у него статичные столбцы
+            if loc_sheet_id != 22:  # 22 - ключ для "Отчет по КПД ДО" у него статичные столбцы
                 # ======================================================================================================
                 # Процесс генерации ключей для ввода данных
                 columns_settings = get_common_column_settings(set_row_left_col_index)
@@ -2726,7 +2784,8 @@ def upload_report(sheet_id: str, file_storage: FileStorage):
 
         sheet_id_all = [
             {'id' : row.id, 'name' : row.name }
-            for row in uf.get_data_from_query("SELECT id, name FROM tab_sheet_id_list_d816_4")
+            for row in uf.get_data_from_query("SELECT sheet_id as id, name_display as name FROM tab_sheet_id_list_d816_4")
+            if row.id == 21 # 21 - принудительно только для Баланс ЗС
         ]
         sheet_id_list_all = [item.get('id') for item in sheet_id_all]
         if int(sheet_id) in sheet_id_list_all:
@@ -2832,6 +2891,8 @@ def insert_get_preu_mirror_in_tab(data):
         return True
 
     except errors.UniqueViolation as e:
+        return False
+    except Exception as e:
         return False
 
     finally:
