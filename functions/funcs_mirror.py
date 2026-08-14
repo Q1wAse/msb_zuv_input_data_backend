@@ -921,6 +921,7 @@ def main_download_report(download_type, selected_factories, selected_reports, sr
                     'MergeCount': count_columns,
                     'col_name': get_txt_col(column),
                     'internal_key': get_internal_key(column, simple_key),
+                    'internal_key_xlsx': get_internal_key(column, simple_key),
                     'period': column.get('dateRange')[0][-4:]
                 })
             elif ColumnType in ('SecondMinusFirst', 'PercentOfComplete', 'PercentOfOutput'):
@@ -939,6 +940,7 @@ def main_download_report(download_type, selected_factories, selected_reports, sr
                     'col_name': get_txt_col(column),
                     'GroupName': column.get('GroupName', ''),
                     'internal_key': '',  # get_internal_key(column, simple_key),
+                    'internal_key_xls': '',
                     'FormulaLink': FormulaLink,
                     'period': ''
                 })
@@ -958,6 +960,7 @@ def main_download_report(download_type, selected_factories, selected_reports, sr
                         'MergeCount': count_columns,
                         'col_name': get_txt_col(column),
                         'internal_key': get_internal_key(column, f"year{column.get('dateRange')[0][-4:]}:{simple_key}"),
+                        'internal_key_xls': get_internal_key(column, f"year{column.get('dateRange')[0][-4:]}:{simple_key}"),
                         'period': column.get('dateRange')[0][-4:]
                     })
                 elif ColumnType in ('SecondMinusFirst', 'PercentOfComplete', 'PercentOfOutput'):
@@ -976,6 +979,7 @@ def main_download_report(download_type, selected_factories, selected_reports, sr
                         'col_name': get_txt_col(column),
                         'GroupName': column.get('GroupName', ''),
                         'internal_key': '',  # get_internal_key(column, simple_key),
+                        'internal_key_xls': '',
                         'FormulaLink': FormulaLink,
                         'period': ''
                     })
@@ -984,6 +988,7 @@ def main_download_report(download_type, selected_factories, selected_reports, sr
                     ColumnType = column.get('ColumnType')
                     if ColumnType == 'Selected':
                         simple_key = f"M{q}_{m}"
+                        calmonth = (q - 1) * 3 + m
                         columns_layout.append({
                             'Letter': '',
                             'ColumnType': ColumnType,
@@ -993,9 +998,9 @@ def main_download_report(download_type, selected_factories, selected_reports, sr
                             'IsNeedMerge': True if index_column == 0 else False,
                             'MergeCount': count_columns,
                             'col_name': get_txt_col(column),
-                            'calmonth': (q - 1) * 3 + m,
-                            'internal_key': get_internal_key(column,
-                                                             f"year{column.get('dateRange')[0][-4:]}:{simple_key}"),
+                            'calmonth': calmonth,
+                            'internal_key': get_internal_key(column,f"year{column.get('dateRange')[0][-4:]}:{simple_key}"),
+                            'internal_key_xls': get_internal_key(column,f"year{column.get('dateRange')[0][-4:]}:M{q}_{calmonth}"),
                             'period': column.get('dateRange')[0][-4:]
                         })
                     elif ColumnType in ('SecondMinusFirst', 'PercentOfComplete', 'PercentOfOutput'):
@@ -1014,6 +1019,7 @@ def main_download_report(download_type, selected_factories, selected_reports, sr
                             'col_name': get_txt_col(column),
                             'GroupName': column.get('GroupName', ''),
                             'internal_key': '',  # get_internal_key(column, simple_key),
+                            'internal_key_xls': '',
                             'FormulaLink': FormulaLink,
                             'period': ''
                         })
@@ -1035,6 +1041,7 @@ def main_download_report(download_type, selected_factories, selected_reports, sr
                         'MergeCount': 0,
                         'col_name': get_txt_col(column),
                         'internal_key': get_internal_key(column, f"year{year}:{simple_key}"),
+                        'internal_key_xls': get_internal_key(column, f"year{year}:{simple_key}"),
                         'period': year
                     })
         date_format = "%d.%m.%Y"
@@ -1406,7 +1413,8 @@ def main_download_report(download_type, selected_factories, selected_reports, sr
                             multi_range_rules.add(current_range)
 
                     # Заголовок уровня 3 (внутренние ключи)
-                    set_value_cell(sheet.cell(row=first_row + 3, column=col_num), col.get('internal_key'))
+                    # set_value_cell(sheet.cell(row=first_row + 3, column=col_num), col.get('internal_key'))
+                    set_value_cell(sheet.cell(row=first_row + 3, column=col_num), col.get('internal_key_xls'))
 
                     if 'IsNeedMerge' in col and col['IsNeedMerge']:
                         MergeCount = col.get('MergeCount', 0)
