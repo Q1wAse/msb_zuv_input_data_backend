@@ -615,6 +615,9 @@ def main_download_report(download_type, selected_factories, selected_reports, sr
         G_STYLE_RULE_DASH_FOR_ZERO, \
         G_STYLE_CELL_INPUT
 
+    selected_factories = [int(item) for item in selected_factories]
+    selected_reports = [int(item) for item in selected_reports]
+
     storage_sheet = defaultdict(lambda: defaultdict(dict))
 
     SHEETS_SETTINGS = get_sheets_settings()
