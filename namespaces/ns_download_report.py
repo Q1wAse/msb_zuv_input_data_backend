@@ -178,10 +178,29 @@ class ClsStructDataDownloadReport(Resource):
                     "utv": 0
                 })
 
+            sheet_id_all = funcs_mirror.get_sheets_settings()
+
             total = {
-                'factories': uf.get_pagin_data('factories', '', 1, 100),
-                # 'type_reports': uf.sort_list_by_field(uf.get_pagin_data('type_reports', '', 1, 100)),
-                'type_reports': funcs_mirror.get_type_reports_list(),
+                'factories': funcs_mirror.get_sheet_list_by_fields(
+                    items_list=sheet_id_all,
+                    filters={
+                        'type_sheet' : 'FACTORY', # имя_ключа : значение_ключа
+                    },
+                    output_fields={
+                        'sheet_id' : 'id', # имя_ключа : новое_имя_ключа
+                        'name_sheet' : 'name', # имя_ключа : новое_имя_ключа
+                    },
+                ),
+                'type_reports': funcs_mirror.get_sheet_list_by_fields(
+                    items_list=sheet_id_all,
+                    filters={
+                        'type_sheet' : 'REPORT', # имя_ключа : значение_ключа
+                    },
+                    output_fields={
+                        'sheet_id' : 'id', # имя_ключа : новое_имя_ключа
+                        'name_sheet' : 'name', # имя_ключа : новое_имя_ключа
+                    },
+                ),
                 'data_type': uf.get_pagin_data('data_type', '', 1, 100),
                 'versions': list(grouped.values()),
                 'last_update': uf.get_last_update(),

@@ -1,3 +1,4 @@
+from typing import List, Dict, Any, Union
 import sys, os, re, io, copy, traceback, openpyxl
 from datetime import datetime
 from psycopg2 import errors
@@ -100,6 +101,10 @@ G_STYLE_FONT_CHECKER1 = None
 G_STYLE_RULE_DASH_FOR_ZERO = None
 G_STYLE_CELL_INPUT = None
 
+SHEETS_SETTINGS = []
+SHEETS_SETTINGS_REPORT_LIST = []
+SHEETS_SETTINGS_FACTORY_LIST = []
+
 template_list = [
     'Астрахань',
     'Сосногорск'
@@ -125,38 +130,74 @@ generating_report_settings = {
     '20': {'index': '4'},  # Факт общий
     '21': {'index': '2'},  # Баланс ЗС
     '23': {'index': '3'},  # ЕЖО
+    '24': {'index': '5'},  # 1-003-О
 }
 
 
 # ============================================================================================
-def get_type_reports_list():
-    db = uf.get_db_connection()
-    list = []
-    try:
+def get_sheets_settings():
+    return uf.get_dict_data_from_query("SELECT * FROM tab_view_sheet_id_list_d816_4")
+def get_report_sheet_id_list(list, type_generation):
+    if list:
+        return [
+            item.get('sheet_id')
+            for item in list
+            if item.get('type_generation') == type_generation
+        ]
+    return []
+def get_sheet_list_by_field(list, field_name, field_filter):
+    if list:
+        return [
+            item.get('sheet_id')
+            for item in list
+            if item.get(field_name) == field_filter
+        ]
+    return []
+def get_sheet_list_by_fields(
+        items_list: List[Dict[str, Any]],
+        filters: Dict[str, Any],
+        output_fields: Union[List[str], Dict[str, str]] = None
+) -> List[Dict[str, Any]]:
+    """
+    Получить список лисов с заданным условием и перечисленным полями, которые можно переименовать
+    """
+    if not items_list:
+        return []
 
-        result = db.execute(text("""
-            SELECT
-                sheet_id as id,
-                name_display as name,
-                upload::boolean
-            FROM
-                tab_sheet_id_list_d816_4
-            WHERE
-                TYPE_SHEET = 'REPORT'
-            ORDER BY
-                sheet_id
-        """)).mappings()
-        for row in result:
-            res = {}
-            for key, value in row.items():
-                if key == 'upload' and value is None:
-                    pass
-                else:
-                    res[key] = value
-            list.append(res)
-    except Exception as e:
-        return list
-    return list
+    if output_fields is None:
+        output_fields = {'sheet_id': 'sheet_id'}
+
+    if isinstance(output_fields, list):
+        fields_mapping = {field: field for field in output_fields}
+    else:
+        fields_mapping = output_fields
+
+    matched_items = []
+    for item in items_list:
+        if all(item.get(field) == value for field, value in filters.items()):
+            extracted_data = {}
+            for original_name, custom_name in fields_mapping.items():
+                extracted_data[custom_name] = item.get(original_name)
+            matched_items.append(extracted_data)
+    return matched_items
+# ============================================================================================
+def get_sheet_list_with_this_open(list_data, selected_reports):
+    sheet_id_list = []
+    if list_data:
+        if selected_reports:
+            open_with_this_sheet_id_list = [
+                sheet_data.get('open_with_this_sheet_id')
+                for sheet_data in list_data
+                for item in selected_reports
+                if sheet_data.get('sheet_id') == int(item) and sheet_data.get('type_sheet') == 'REPORT'
+            ]
+            if open_with_this_sheet_id_list:
+                for sheet_data in open_with_this_sheet_id_list:
+                    if sheet_data:
+                        sheet_id = [int(number_str) for number_str in re.findall(r'\d+', sheet_data)]
+                        if sheet_id:
+                            sheet_id_list = list(set(sheet_id_list) | set(sheet_id))
+    return sheet_id_list
 # ============================================================================================
 def get_row_list_msb_zuv_d816_4(
         year: int,
@@ -577,19 +618,12 @@ def main_download_report(download_type, selected_factories, selected_reports, sr
 
     storage_sheet = defaultdict(lambda: defaultdict(dict))
 
-    SHEETS_SETTINGS = uf.get_dict_data_from_query("""
-        SELECT
-            sheet_id,
-            name_sheet,
-            name_display,
-            upload,
-            type_sheet,
-            type_generation
-        FROM
-            tab_sheet_id_list_d816_4
-    """)
+    SHEETS_SETTINGS = get_sheets_settings()
     if not SHEETS_SETTINGS:
         return uf.get_msg_struct(uf.EnumMsg.SETTINGS_FOR_REPORT_NOT_FOUND)
+
+    SHEETS_SETTINGS_REPORT_LIST = [item for item in SHEETS_SETTINGS if item.get('type_sheet') == 'REPORT']
+    SHEETS_SETTINGS_FACTORY_LIST = [item for item in SHEETS_SETTINGS if item.get('type_sheet') == 'FACTORY']
 
     month = {
         1: 'январь',
@@ -609,10 +643,13 @@ def main_download_report(download_type, selected_factories, selected_reports, sr
     len_src_columns = len(src_columns)
     # ==================================================================================================================
     offset_ind_col = 1
-    factories_all = [str(row.id) for row in uf.get_data_from_query("SELECT id FROM tab_factories_d816_4")]
+    # factories_all = [str(row.id) for row in uf.get_data_from_query("SELECT id FROM tab_factories_d816_4")]
+    factories_all = get_sheet_list_by_field(SHEETS_SETTINGS,'type_sheet','FACTORY')
     if not selected_factories:
-        selected_factories = factories_all
-    reports_all = [str(row.id) for row in uf.get_data_from_query("SELECT id FROM tab_type_reports_d816_4")]
+        # selected_factories = factories_all
+        selected_factories = get_sheet_list_with_this_open(SHEETS_SETTINGS, selected_reports)
+    # reports_all = [str(row.id) for row in uf.get_data_from_query("SELECT id FROM tab_type_reports_d816_4")]
+    reports_all = get_sheet_list_by_field(SHEETS_SETTINGS,'type_sheet','REPORT')
     # if not selected_reports:
     #     selected_reports = [1]
 
@@ -623,10 +660,9 @@ def main_download_report(download_type, selected_factories, selected_reports, sr
         return uf.get_msg_struct(uf.EnumMsg.SETTINGS_FOR_REPORT_NOT_FOUND)
 
     generating_type = {
-        'NeedGeneratingReport': bool(selected_factories or (any(item in selected_reports for item in
-                                                                ['19', '20', '21', '23']
-                                                                ))),
-        'NeedStaticReport': any(item in selected_reports for item in ['22']),
+        'NeedGeneratingReport': bool(selected_factories or
+                                     (any(item in selected_reports for item in get_report_sheet_id_list(SHEETS_SETTINGS_REPORT_LIST,'GENERATING')))),
+        'NeedStaticReport': any(item in selected_reports for item in get_report_sheet_id_list(SHEETS_SETTINGS_REPORT_LIST,'STATIC')),
     }
 
     if len_src_columns > 1:
@@ -1427,9 +1463,10 @@ def main_download_report(download_type, selected_factories, selected_reports, sr
                 do = 0
                 pj = 0
                 if type_sheet == 'type_factory':
-                    loc_settings = next((row for row in settings if str(row.id) == sheet_id), None)
-                    do = loc_settings.DO
-                    pj = loc_settings.pj
+                    loc_settings = next((row for row in settings if row.id == sheet_id), None)
+                    if loc_settings:
+                        do = loc_settings.DO
+                        pj = loc_settings.pj
                 elif type_sheet == 'type_summary_rep':
                     pass
                     # for index_column, column in enumerate(struct_columns, start=1):
@@ -2389,7 +2426,12 @@ def get_report_template(id):
     # Получаем рабочую книгу из шаблона
     wb = openpyxl.load_workbook(path_template)
 
-    sheet_id_all = [row.id for row in uf.get_data_from_query("SELECT sheet_id as id FROM tab_sheet_id_list_d816_4")]
+    SHEETS_SETTINGS = get_sheets_settings()
+
+    if not SHEETS_SETTINGS:
+        return uf.get_msg_struct(uf.EnumMsg.SETTINGS_FOR_REPORT_NOT_FOUND)
+
+    sheet_id_all = [item.get('sheet_id') for item in SHEETS_SETTINGS]
     for loc_sheet_id in sheet_id_all:
         try:
             sheet = get_sheet_from_sheet_id(wb,loc_sheet_id)
@@ -2430,6 +2472,13 @@ def upload_report_template(sheet_id: str, file_storage: FileStorage):
 
     except Exception as e:
         return uf.get_msg_struct(uf.EnumMsg.ERROR_OPEN_TEMPLATE, str(e))
+
+    SHEETS_SETTINGS = get_sheets_settings()
+    if not SHEETS_SETTINGS:
+        return uf.get_msg_struct(uf.EnumMsg.SETTINGS_FOR_REPORT_NOT_FOUND)
+
+    sheets_settings_report_static = get_sheet_list_by_field(SHEETS_SETTINGS,'type_sheet', 'STATIC')
+    sheets_settings_upload = get_sheet_list_by_field(SHEETS_SETTINGS,'upload', '1')
 
     try:
         # ==============================================================================================================
@@ -2518,7 +2567,7 @@ def upload_report_template(sheet_id: str, file_storage: FileStorage):
             # SHEET_ID
             sheet_id_data = get_data_from_named_range_name(wb, f'_SHEET_ID{loc_sheet_id}')
             if sheet_id_data.get('Exec', False) == False:
-                return False
+                return 1
             # ==========================================================================================================
             nr_sheet_id_sheet_name = sheet_id_data.get('sheet_name')
             # Именованная диапазоны, которые должны быть обязаны на каждом вычислительном листе
@@ -2529,7 +2578,7 @@ def upload_report_template(sheet_id: str, file_storage: FileStorage):
 
 
             if nr_set_row is None or nr_internal_key is None:
-                return False
+                return 2
             _set_row_data = get_data_from_named_range(wb, nr_set_row)
             _internal_key_data = get_data_from_named_range(wb, nr_internal_key)
 
@@ -2547,7 +2596,8 @@ def upload_report_template(sheet_id: str, file_storage: FileStorage):
 
 
             # ==========================================================================================================
-            if loc_sheet_id != 22: # 22 - ключ для "Отчет по КПД ДО" у него статичные столбцы
+            # 22 - ключ для "Отчет по КПД ДО" у него статичные столбцы
+            if loc_sheet_id not in sheets_settings_report_static:
                 start_col = set_row_right_col_index + 2
                 end_col = sheet.max_column + 1
                 amount_col = end_col - start_col
@@ -2591,7 +2641,8 @@ def upload_report_template(sheet_id: str, file_storage: FileStorage):
                             pass
                 # ======================================================================================================
                 # Процесс генерации ключей для ввода данных
-                if loc_sheet_id == 21: # 21 - Генерация пока что только для отчёта Баланс ЗС
+                # 21 - Генерация пока что только для отчёта Баланс ЗС
+                if loc_sheet_id not in sheets_settings_upload:
                     columns_settings = get_common_column_settings(set_row_left_col_index)
                     dict_exists_key_input = []
                     dict_new_key_input = []
@@ -2613,7 +2664,15 @@ def upload_report_template(sheet_id: str, file_storage: FileStorage):
 
                     # генерируем ключи для ввода данных, если есть пустые ячейки для ключа "ввод данных"
                     if dict_new_key_input:
-                        next_value = max(dict_exists_key_input, default=0)
+                        # next_value = max(dict_exists_key_input, default=0)
+                        next_value = uf.get_dict_data_from_query(f"""
+                            SELECT
+                                coalesce(max(bs),0) as max
+                            FROM
+                                tab_integ_get_preu_mirror_d816_4
+                            WHERE
+                                sheet_id = {loc_sheet_id}
+                        """)[0].get('max',0)
                         for item in dict_new_key_input:
                             next_value += 1
                             item['key_bs'] = next_value
@@ -2632,9 +2691,24 @@ def upload_report_template(sheet_id: str, file_storage: FileStorage):
                 # ======================================================================================================
             else:
                 pass
-            return True
+            return 0
 
-        # sheet_id_all = [{'id' : row.sheet_id, 'name' : row.name_sheet }for row in uf.get_data_from_query("SELECT sheet_id, name_sheet FROM tab_sheet_id_list_d816_4")]
+        # sheet_id_all = [{'id' : row.sheet_id, 'name' : row.name_sheet }for row in uf.get_data_from_query("""
+        #     SELECT
+        #         sheet_id,
+        #         name_sheet
+        #     FROM
+        #         tab_sheet_id_list_d816_4
+        #     ORDER BY
+        #         SHEET_ID
+        # """)]
+        sheet_id_all = [
+            {
+                'id' : item.get('sheet_id'),
+                'name' : item.get('name_sheet')
+            }
+            for item in SHEETS_SETTINGS
+        ]
         # sheet_id_all = [
         #     { 'id' : 1, 'name' : 'sheet 1' },
         #     { 'id' : 2, 'name' : 'sheet 2' },
@@ -2650,8 +2724,9 @@ def upload_report_template(sheet_id: str, file_storage: FileStorage):
         for row in sheet_id_all:
             id = row.get('id')
             name = row.get('name')
-            if check_this_sheet_id_template(id) == False:
-                return uf.get_msg_struct(uf.EnumMsg.ERROR_VALID_NEW_TEMPLATE, f"id {id} - {name}")
+            check_result = check_this_sheet_id_template(id)
+            if check_result != 0:
+                return uf.get_msg_struct(uf.EnumMsg.ERROR_VALID_NEW_TEMPLATE, f"№e{check_result} id {id} - {name}")
 
         for item in dict_main_input_data_tab.values():
             save_input_data_key = insert_sheet_key_in_tab(item.get('dict_input_data_tab', None))
@@ -2712,13 +2787,20 @@ def upload_report(sheet_id: str, file_storage: FileStorage):
     except Exception as e:
         return uf.get_msg_struct(uf.EnumMsg.ERROR_OPEN_TEMPLATE, str(e))
 
+    SHEETS_SETTINGS = get_sheets_settings()
+    if not SHEETS_SETTINGS:
+        return uf.get_msg_struct(uf.EnumMsg.SETTINGS_FOR_REPORT_NOT_FOUND)
+
+    sheets_settings_report_static = get_sheet_list_by_field(SHEETS_SETTINGS,'type_sheet', 'STATIC')
+    sheets_settings_with_upload = get_sheet_list_by_field(SHEETS_SETTINGS,'upload', '1')
+
     try:
         def save_data_this_sheet_id(loc_sheet_id):
             # ==========================================================================================================
             # SHEET_ID
             nr_sheet_id = get_data_from_named_range_name(wb, f'_SHEET_ID{loc_sheet_id}')
             if nr_sheet_id.get('Exec', False) == False:
-                return False
+                return 1
             # ==========================================================================================================
             nr_sheet_id_sheet_name = nr_sheet_id.get('sheet_name')
             # Именованная диапазоны, которые должны быть обязаны на каждом вычислительном листе
@@ -2729,7 +2811,7 @@ def upload_report(sheet_id: str, file_storage: FileStorage):
             _internal_key = get_named_range_from_sheet_id_and_nr_name(wb, loc_sheet_id, '_INTERNAL_KEY')
 
             if _set_row is None or _internal_key is None:
-                return False
+                return 2
             nr_set_row = get_data_from_named_range(wb, _set_row)
             nr_internal_key = get_data_from_named_range(wb, _internal_key)
 
@@ -2748,7 +2830,10 @@ def upload_report(sheet_id: str, file_storage: FileStorage):
 
 
             # ==========================================================================================================
-            if loc_sheet_id != 22:  # 22 - ключ для "Отчет по КПД ДО" у него статичные столбцы
+            # Исключаем отчёты со статичными столбцами
+            # в будущем возможно такая особенность будет нужна и её возможно реализовать, но
+            # сейчас такой реализации нет
+            if loc_sheet_id not in sheets_settings_report_static:
                 # ======================================================================================================
                 # Процесс генерации ключей для ввода данных
                 columns_settings = get_common_column_settings(set_row_left_col_index)
@@ -2774,24 +2859,26 @@ def upload_report(sheet_id: str, file_storage: FileStorage):
                                         new_insert_rows.append(build_dict_row(InternalKeys, EnumFuncModuParameter.proizv_pererab.value))
                 if new_insert_rows:
                     if insert_get_preu_mirror_in_tab(new_insert_rows):
-                        return True
+                        return 0
                     else:
-                        return False
+                        return 3
                 # ======================================================================================================
             else:
                 pass
-            return True
+            return 0
 
-        sheet_id_all = [
-            {'id' : row.id, 'name' : row.name }
-            for row in uf.get_data_from_query("SELECT sheet_id as id, name_display as name FROM tab_sheet_id_list_d816_4")
-            if row.id == 21 # 21 - принудительно только для Баланс ЗС
-        ]
-        sheet_id_list_all = [item.get('id') for item in sheet_id_all]
+        # sheet_id_all = [
+        #     {'id' : row.id, 'name' : row.name }
+        #     for row in uf.get_data_from_query("SELECT sheet_id as id, name_display as name FROM tab_sheet_id_list_d816_4")
+        #     if row.id == 21 # 21 - принудительно только для Баланс ЗС
+        # ]
+        sheet_id_all = sheets_settings_with_upload
+        sheet_id_list_all = [item.get('sheet_id') for item in sheet_id_all]
         if int(sheet_id) in sheet_id_list_all:
-            row = next((item for item in sheet_id_all if item['id'] == int(sheet_id)), None)
-            if save_data_this_sheet_id(row.get('id')) == False:
-                return uf.get_msg_struct(uf.EnumMsg.ERROR_VALID_NEW_TEMPLATE, f"id {row.get('id')} - {row.get('name')}")
+            row = next((item for item in sheet_id_all if item['sheet_id'] == int(sheet_id)), None)
+            result_save = save_data_this_sheet_id(row.get('sheet_id'))
+            if result_save == 0:
+                return uf.get_msg_struct(uf.EnumMsg.ERROR_VALID_NEW_TEMPLATE, f"№e{result_save} id {row.get('sheet_id')} - {row.get('name')}")
 
         wb.close()
 
@@ -2800,7 +2887,17 @@ def upload_report(sheet_id: str, file_storage: FileStorage):
     except Exception as e:
         if 'wb' in locals():
             wb.close()
-        return uf.get_msg_struct(uf.EnumMsg.SYSTEM_ERROR)
+
+        _, _, exc_tb = sys.exc_info()
+        tb_info = traceback.extract_tb(exc_tb)[-1]
+
+        error_msg = (
+            f"Error: {e} | "
+            f"File: {tb_info.filename} | "
+            f"Line: {tb_info.lineno} | "
+            f"Func: {tb_info.name}"
+        )
+        return uf.get_msg_struct(uf.EnumMsg.ERROR_SAVE_OR_PROC_TEMPLATE, error_msg)
 # ============================================================================================
 # ============================================================================================
 def insert_sheet_key_in_tab(input_data_key):
