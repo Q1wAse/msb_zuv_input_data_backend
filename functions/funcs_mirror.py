@@ -1802,7 +1802,7 @@ def main_download_report(download_type, selected_factories, selected_reports, sr
                                                 ['_SUM_REP_SET_ROW', '_SUM_REP_INTERNAL_KEY'])
 
     if generating_type.get('NeedStaticReport', False):
-        #FIXME Доработать получение настроек тз настроечной таблицы, которая реализована через функцию:
+        #FIXME Доработать получение настроек из настроечной таблицы, которая реализована через функцию:
         #FIXME get_sheets_settings()
         static_report_settings = {
             '22': {  # Отчёт КПД ДО

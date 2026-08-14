@@ -188,7 +188,7 @@ class ClsStructDataDownloadReport(Resource):
                     },
                     output_fields={
                         'sheet_id' : 'id', # имя_ключа : новое_имя_ключа
-                        'name_sheet' : 'name', # имя_ключа : новое_имя_ключа
+                        'name_display' : 'name', # имя_ключа : новое_имя_ключа
                     },
                 ),
                 'type_reports': funcs_mirror.get_sheet_list_by_fields(
