@@ -343,7 +343,6 @@ def get_data_from_named_range(wb, named_range):
         'max_col': max_col,
         'max_row': max_row
     }
-# KIVA
 def get_named_range_from_sheet_id_and_nr_name(wb, sheet_id, partial_named_range_name):
     sheet = None
     min_col, min_row, max_col, max_row = 0, 0, 0, 0
@@ -1803,6 +1802,8 @@ def main_download_report(download_type, selected_factories, selected_reports, sr
                                                 ['_SUM_REP_SET_ROW', '_SUM_REP_INTERNAL_KEY'])
 
     if generating_type.get('NeedStaticReport', False):
+        #FIXME Доработать получение настроек тз настроечной таблицы, которая реализована через функцию:
+        #FIXME get_sheets_settings()
         static_report_settings = {
             '22': {  # Отчёт КПД ДО
                 'SET_ROW': '_STATIC_REP_SET_ROW1',
