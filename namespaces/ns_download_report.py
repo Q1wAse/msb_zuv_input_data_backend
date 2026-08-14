@@ -179,6 +179,25 @@ class ClsStructDataDownloadReport(Resource):
                 })
 
             sheet_id_all = funcs_mirror.get_sheets_settings()
+            type_reports = funcs_mirror.get_sheet_list_by_fields(
+                    items_list=sheet_id_all,
+                    filters={
+                        'type_sheet' : 'REPORT', # имя_ключа : значение_ключа
+                    },
+                    output_fields={
+                        'sheet_id' : 'id', # имя_ключа : новое_имя_ключа
+                        'name_sheet' : 'name', # имя_ключа : новое_имя_ключа
+                        'upload' : 'upload', # имя_ключа : новое_имя_ключа
+                    },
+                ),
+            type_reports_list = type_reports[0]
+
+            for report in type_reports_list:
+                if "upload" in report:
+                    if report["upload"] is None:
+                        report.pop("upload")
+                    elif report["upload"] == 1:
+                        report["upload"] = True
 
             total = {
                 'factories': funcs_mirror.get_sheet_list_by_fields(
@@ -191,16 +210,7 @@ class ClsStructDataDownloadReport(Resource):
                         'name_display' : 'name', # имя_ключа : новое_имя_ключа
                     },
                 ),
-                'type_reports': funcs_mirror.get_sheet_list_by_fields(
-                    items_list=sheet_id_all,
-                    filters={
-                        'type_sheet' : 'REPORT', # имя_ключа : значение_ключа
-                    },
-                    output_fields={
-                        'sheet_id' : 'id', # имя_ключа : новое_имя_ключа
-                        'name_sheet' : 'name', # имя_ключа : новое_имя_ключа
-                    },
-                ),
+                'type_reports': type_reports_list,
                 'data_type': uf.get_pagin_data('data_type', '', 1, 100),
                 'versions': list(grouped.values()),
                 'last_update': uf.get_last_update(),

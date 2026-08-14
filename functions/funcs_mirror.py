@@ -1046,7 +1046,8 @@ def main_download_report(download_type, selected_factories, selected_reports, sr
                         'internal_key_xls': get_internal_key(column, f"year{year}:{simple_key}"),
                         'period': year
                     })
-        date_format = "%d.%m.%Y"
+        #date_format = "%m.%Y"
+        possible_formats = ["%d.%m.%Y", "%m.%Y"]
 
         # len_col = len(columns)
         # for y in range(1, 3):
@@ -1175,10 +1176,23 @@ def main_download_report(download_type, selected_factories, selected_reports, sr
 
                         new_dates = []
                         for date_str in col["dateRange"]:
-                            date_obj = datetime.strptime(date_str, date_format)
-                            new_date_obj = date_obj.replace(year=date_obj.year + y)
 
-                            new_dates.append(new_date_obj.strftime(date_format))
+                            date_obj = None
+                            matched_format = None
+
+                            for fmt in possible_formats:
+                                try:
+                                    date_obj = datetime.strptime(date_str, fmt)
+                                    matched_format = fmt
+                                    break
+                                except ValueError:
+                                    continue
+
+                            if date_obj is not None:
+                                new_date_obj = date_obj.replace(year=date_obj.year + y)
+                                new_dates.append(new_date_obj.strftime(matched_format))
+
+
 
                         col["dateRange"] = new_dates
 
