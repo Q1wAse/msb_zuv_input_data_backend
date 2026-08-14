@@ -616,7 +616,7 @@ def main_download_report(download_type, selected_factories, selected_reports, sr
         G_STYLE_CELL_INPUT
 
     selected_factories = [int(item) for item in selected_factories]
-    selected_reports = [int(item) for item in selected_reports]
+    # selected_reports = [int(item) for item in selected_reports]
 
     storage_sheet = defaultdict(lambda: defaultdict(dict))
 
@@ -792,6 +792,17 @@ def main_download_report(download_type, selected_factories, selected_reports, sr
                 for rule in cf.rules:
                     G_STYLE_RULE_DASH_FOR_ZERO = rule
         G_STYLE_CELL_INPUT = extract_cell_styles(ws_tech['B13'])
+
+        # ==============================================================================================================
+        # скрыть все листы полученные из настроек
+        for loc_sheet in SHEETS_SETTINGS:
+            loc_sheet_id = loc_sheet.get('sheet_id')
+            if loc_sheet_id:
+                nr_sheet_id = get_data_from_named_range_name(wb, f'_SHEET_ID{loc_sheet_id}')
+                if nr_sheet_id.get('Exec', False):
+                    sheet = nr_sheet_id.get('sheet', None)
+                    if sheet:
+                        sheet.sheet_state = 'veryHidden'
     # ==================================================================================================================
     columns = []
     if generating_type.get('NeedGeneratingReport', False):
@@ -2503,8 +2514,18 @@ def upload_report_template(sheet_id: str, file_storage: FileStorage):
     if not SHEETS_SETTINGS:
         return uf.get_msg_struct(uf.EnumMsg.SETTINGS_FOR_REPORT_NOT_FOUND)
 
-    sheets_settings_report_static = get_sheet_list_by_field(SHEETS_SETTINGS,'type_sheet', 'STATIC')
-    sheets_settings_upload = get_sheet_list_by_field(SHEETS_SETTINGS,'upload', '1')
+    sheets_settings_report_static = get_sheet_list_by_field(SHEETS_SETTINGS,'type_generation', 'STATIC')
+    sheets_settings_with_upload = list(get_sheet_list_by_fields(
+        items_list=SHEETS_SETTINGS,
+        filters={
+            'upload': 1,  # имя_ключа : значение_ключа
+        },
+        output_fields={
+            'sheet_id': 'sheet_id',  # имя_ключа : новое_имя_ключа
+            'name_display': 'name_display',  # имя_ключа : новое_имя_ключа
+        },
+    ))
+    sheets_settings_upload = [item.get('sheet_id') for item in sheets_settings_with_upload]
 
     try:
         # ==============================================================================================================
@@ -2719,37 +2740,10 @@ def upload_report_template(sheet_id: str, file_storage: FileStorage):
                 pass
             return 0
 
-        # sheet_id_all = [{'id' : row.sheet_id, 'name' : row.name_sheet }for row in uf.get_data_from_query("""
-        #     SELECT
-        #         sheet_id,
-        #         name_sheet
-        #     FROM
-        #         tab_sheet_id_list_d816_4
-        #     ORDER BY
-        #         SHEET_ID
-        # """)]
-        sheet_id_all = [
-            {
-                'id' : item.get('sheet_id'),
-                'name' : item.get('name_sheet')
-            }
-            for item in SHEETS_SETTINGS
-        ]
-        # sheet_id_all = [
-        #     { 'id' : 1, 'name' : 'sheet 1' },
-        #     { 'id' : 2, 'name' : 'sheet 2' },
-        #     { 'id' : 20, 'name' : 'sheet 20' },
-        #     { 'id' : 21, 'name' : 'sheet 21' },
-        #     { 'id' : 22, 'name' : 'sheet 22' },
-        # ]
-        sheet_id_all = [
-            {'id': 21, 'name': 'Баланс ЗС'}, # 21 -Генерация пока что только для Баланс ЗС
-        ]
-
         dict_main_input_data_tab = {}
-        for row in sheet_id_all:
-            id = row.get('id')
-            name = row.get('name')
+        for row in sheets_settings_with_upload:
+            id = row.get('sheet_id')
+            name = row.get('name_display')
             check_result = check_this_sheet_id_template(id)
             if check_result != 0:
                 return uf.get_msg_struct(uf.EnumMsg.ERROR_VALID_NEW_TEMPLATE, f"№e{check_result} id {id} - {name}")
@@ -2817,8 +2811,17 @@ def upload_report(sheet_id: str, file_storage: FileStorage):
     if not SHEETS_SETTINGS:
         return uf.get_msg_struct(uf.EnumMsg.SETTINGS_FOR_REPORT_NOT_FOUND)
 
-    sheets_settings_report_static = get_sheet_list_by_field(SHEETS_SETTINGS,'type_sheet', 'STATIC')
-    sheets_settings_with_upload = get_sheet_list_by_field(SHEETS_SETTINGS,'upload', '1')
+    sheets_settings_report_static = get_sheet_list_by_field(SHEETS_SETTINGS,'type_generation', 'STATIC')
+    sheets_settings_with_upload = list(get_sheet_list_by_fields(
+        items_list=SHEETS_SETTINGS,
+        filters={
+            'upload': 1,  # имя_ключа : значение_ключа
+        },
+        output_fields={
+            'sheet_id': 'sheet_id',  # имя_ключа : новое_имя_ключа
+            'name_display': 'name_display',  # имя_ключа : новое_имя_ключа
+        },
+    ))
 
     try:
         def save_data_this_sheet_id(loc_sheet_id):
@@ -2893,18 +2896,13 @@ def upload_report(sheet_id: str, file_storage: FileStorage):
                 pass
             return 0
 
-        # sheet_id_all = [
-        #     {'id' : row.id, 'name' : row.name }
-        #     for row in uf.get_data_from_query("SELECT sheet_id as id, name_display as name FROM tab_sheet_id_list_d816_4")
-        #     if row.id == 21 # 21 - принудительно только для Баланс ЗС
-        # ]
         sheet_id_all = sheets_settings_with_upload
         sheet_id_list_all = [item.get('sheet_id') for item in sheet_id_all]
         if int(sheet_id) in sheet_id_list_all:
             row = next((item for item in sheet_id_all if item['sheet_id'] == int(sheet_id)), None)
             result_save = save_data_this_sheet_id(row.get('sheet_id'))
-            if result_save == 0:
-                return uf.get_msg_struct(uf.EnumMsg.ERROR_VALID_NEW_TEMPLATE, f"№e{result_save} id {row.get('sheet_id')} - {row.get('name')}")
+            if result_save != 0:
+                return uf.get_msg_struct(uf.EnumMsg.ERROR_VALID_NEW_TEMPLATE, f"№e{result_save} id {row.get('sheet_id')} - {row.get('name_display')}")
 
         wb.close()
 
