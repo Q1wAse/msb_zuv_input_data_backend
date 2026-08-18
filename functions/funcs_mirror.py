@@ -2689,7 +2689,7 @@ def upload_report_template(sheet_id: str, file_storage: FileStorage):
                 # ======================================================================================================
                 # Процесс генерации ключей для ввода данных
                 # 21 - Генерация пока что только для отчёта Баланс ЗС
-                if loc_sheet_id not in sheets_settings_upload:
+                if loc_sheet_id in sheets_settings_upload:
                     columns_settings = get_common_column_settings(set_row_left_col_index)
                     dict_exists_key_input = []
                     dict_new_key_input = []
@@ -2741,7 +2741,7 @@ def upload_report_template(sheet_id: str, file_storage: FileStorage):
             return 0
 
         dict_main_input_data_tab = {}
-        for row in sheets_settings_with_upload:
+        for row in SHEETS_SETTINGS:
             id = row.get('sheet_id')
             name = row.get('name_display')
             check_result = check_this_sheet_id_template(id)

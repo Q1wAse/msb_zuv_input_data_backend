@@ -27,9 +27,13 @@ from msb_zuv_input_data_backend.config import Config, changelog, secret_key
 from msb_zuv_input_data_backend.database import cache
 #===================================================================================================================
 try:
-    from access_control_center.access_control_center_app import validate_requester
-    from access_control_center.centrilized_database_pool import database_session_pool, get_session
-    from central_logging_system.logger import init_logger
+#    from access_control_center.access_control_center_app import validate_requester
+#    from access_control_center.centrilized_database_pool import database_session_pool, get_session
+#    from central_logging_system.logger import init_logger
+    validate_requester = None
+    database_session_pool = None
+    get_session = None
+    init_logger = None
 except Exception:
     validate_requester = None
     database_session_pool = None
