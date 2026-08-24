@@ -110,7 +110,7 @@ def get_tab_name_check(name):
                 if inspector.has_table(tab_name):
                     return tab_name
     return ''
-#=======================================================================================================================
+#=================== Список категорий продукта ========================================================================================
 def get_product_categories():
     db = uf.get_db_connection()
 
@@ -130,6 +130,35 @@ def get_product_categories():
             'id': row.id,
             'name': row.name,
             'ord': row.ord
+        }
+        for row in result
+    ]
+#========================================Продукты для определенной категории продукта
+def get_products_by_category(category_id):
+    db = uf.get_db_connection()
+
+    sql = text("""
+        SELECT
+            id,
+            name,
+            group_nom_real
+        FROM tab_view_product_d816_4
+        WHERE group_nom_real = :category_id
+        ORDER BY name
+    """)
+
+    result = db.execute(
+        sql,
+        {
+            'category_id': int(category_id)
+        }
+    ).fetchall()
+
+    return [
+        {
+            'id': row.id,
+            'name': row.name,
+            'cat_product': row.group_nom_real
         }
         for row in result
     ]

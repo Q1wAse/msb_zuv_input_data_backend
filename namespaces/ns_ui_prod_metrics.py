@@ -63,13 +63,43 @@ class ClsStructDataProdMetrics(Resource):
                     "utv" : 0
                 })
 
+            cat_product = funcs_prod_metrics.get_product_categories()
+            default_category_frame1 = next(
+                (item for item in cat_product if item.get('id') == 7),
+                None
+            )
+            default_category_frame2 = next(
+                (item for item in cat_product if item.get('id') == 2),
+                None
+            )
+
             total = {
                 'factories': funcs_prod_metrics.get_exist_factories('factories_kao'),
                 'data_type': uf.get_pagin_data('data_type_kao', '', 1, 100),
                 'versions': list(grouped.values()),
                 'years' : uf.get_pagin_data('view_year', '', 1, 100),
-                'cat_product': funcs_prod_metrics.get_product_categories(),
-                'last_update' : uf.get_last_update(),
+                'cat_product': cat_product,
+                # Значения по умолчанию для фильтра 1
+                'filter_middle_volume_frame1': {
+                    'cat_product': default_category_frame1,
+                    'product': (
+                        funcs_prod_metrics.get_products_by_category(
+                            default_category_frame1['id']
+                        )
+                        if default_category_frame1 else []
+                    )
+                },
+                # Значения по умолчанию для фильтра 2
+                'filter_middle_volume_frame2': {
+                    'cat_product': default_category_frame2,
+                    'product': (
+                        funcs_prod_metrics.get_products_by_category(
+                            default_category_frame2['id']
+                        )
+                        if default_category_frame2 else []
+                    )
+                },
+                'last_update': uf.get_last_update(),
             }
 
             return total, 200
