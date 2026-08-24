@@ -111,6 +111,29 @@ def get_tab_name_check(name):
                     return tab_name
     return ''
 #=======================================================================================================================
+def get_product_categories():
+    db = uf.get_db_connection()
+
+    sql = text("""
+        SELECT
+            id,
+            name,
+            ord
+        FROM tab_category_product_d816_4
+        ORDER BY ord
+    """)
+
+    result = db.execute(sql).fetchall()
+
+    return [
+        {
+            'id': row.id,
+            'name': row.name,
+            'ord': row.ord
+        }
+        for row in result
+    ]
+#=======================================================================================================================
 def convert_data_to_tab_front_old(result, key_name, reverse_diff=True):
     db = uf.get_db_connection()
     final_res = []
@@ -333,11 +356,13 @@ def get_calc_volume(
 
     db = uf.get_db_connection()
     query_params = {}
+
     period_str = ""
     data_slice_str = ""
     group_by_str = ""
     ei_str = ""
     filter_str = ""
+    category_join_str = ""
 
     if data_slice == 'year':
         period_str = "main.month <> 0 AND"
@@ -353,27 +378,84 @@ def get_calc_volume(
 
     if ei != None:
         ei_str = "main.tab_ei_d816_4_ids = :ei AND"
+        query_params["ei"] = ei
 
+    category_list = []
+
+    # Блок обработки фильтров с учетом категории продуктов
     if filters:
-        for idx, (key, value) in enumerate(filters.items()):
-            if value:
-                need_key = mapping_col.get(key, None)
-                if need_key == None:
-                    continue
-                filter_str = f'{filter_str}main.{need_key} = ANY(:flt{idx}) AND '
-                filter_list = []
-                for flt in value:
-                    filter_list.append(flt)
-                query_params[f'flt{idx}'] = filter_list
+        category_list = [int(x) for x in filters.get("cat_product", [])]
+        idx = 0
+
+        for key, value in filters.items():
+
+            if key == "cat_product":
+                if value:
+                    category_join_str = """
+                            JOIN tab_view_product_d816_4 AS product
+                                ON main.tab_product_d816_4_ids = product.id
+                            JOIN tab_category_product_d816_4 AS category
+                                ON product.group_nom_real = category.id
+                        """
+
+                    filter_str += f"category.id = ANY(:flt{idx}) AND "
+                    query_params[f"flt{idx}"] = [int(flt) for flt in value]
+                    idx += 1
+
+                continue
+
+            if key == "product":
+                continue
+
+            if not value:
+                continue
+
+            need_key = mapping_col.get(key)
+
+            if need_key is None:
+                continue
+
+            filter_str += f"main.{need_key} = ANY(:flt{idx}) AND "
+            query_params[f"flt{idx}"] = [int(v) for v in value]
+            idx += 1
 
     product_list = [int(item) for item in product]
+
+    if category_list:
+        sql_products = text("""
+                SELECT id
+                FROM tab_view_product_d816_4
+                WHERE group_nom_real = ANY(:cat_product)
+                ORDER BY name
+            """)
+
+        result_products = db.execute(
+            sql_products,
+            {"cat_product": category_list}
+        ).fetchall()
+
+        category_product_ids = [row.id for row in result_products]
+
+        # Если пользователь продукты не выбрал — берем все продукты категории
+        if not product_list:
+            product_list = category_product_ids
+
+        # Если выбрал — оставляем только продукты этой категории
+        else:
+            product_list = [
+                p for p in product_list
+                if p in category_product_ids
+            ]
+
+    # --------------------------------------------------------------------------------------------------
+    # Фильтр по продуктам
+
     product_str = ""
     if product_list:
         product_str = "main.tab_product_d816_4_ids = ANY(:product) AND"
         query_params["product"] = product_list
 
     type_raspr_list = [int(item) for item in type_raspr]
-
     factory_list = [int(item) for item in selected_factories]
 
     # var_plans_list = []
@@ -399,8 +481,6 @@ def get_calc_volume(
         for idx, item in enumerate(variant_columns, start=1)
         if str(idx) in selected_variant_compare
     ]
-
-
 
     query_params['type_raspr'] = type_raspr_list
     if ei != None:
@@ -439,6 +519,7 @@ def get_calc_volume(
             COALESCE(SUM(main.value) FILTER (WHERE params.idx = 2), 0.0) AS variant2
 
         FROM tab_pererabotka_d816_4 as main
+            {category_join_str}
             JOIN LATERAL unnest(CAST(:var_plans AS INTEGER[]), CAST(:years AS INTEGER[])) WITH ORDINALITY AS params(var_plan, year, idx)
             ON main.tab_var_plan_d816_4_ids = params.var_plan 
             AND main.year = params.year

@@ -68,6 +68,7 @@ class ClsStructDataProdMetrics(Resource):
                 'data_type': uf.get_pagin_data('data_type_kao', '', 1, 100),
                 'versions': list(grouped.values()),
                 'years' : uf.get_pagin_data('view_year', '', 1, 100),
+                'cat_product': funcs_prod_metrics.get_product_categories(),
                 'last_update' : uf.get_last_update(),
             }
 
@@ -157,11 +158,12 @@ class ClsGetColumnData(Resource):
 #==============================================================================================================================
 #==============================================================================================================================
 flt_middle_volume_model = ns_ui_prod_metrics.model('FltMiddleVolume', {
-    'product': fields.List(fields.Integer,description='Продукт', required=True),
+    'product': fields.List(fields.Integer,description='Продукт', required=False),
     'sobstv': fields.List(fields.Integer,description='Собственник', required=False),
     'mest': fields.List(fields.Integer,description='Месторождение', required=False),
     'post_zuv': fields.List(fields.Integer, description='Поставщик ЖУВ', required=False),
     'ei': fields.List(fields.Integer, description='Единицы измерения', required=False),
+    'cat_product': fields.List(fields.Integer,description='Категория продукта', required=True),
 })
 
 flt_container_get_prod_metrics_model = ns_ui_prod_metrics.model('ContainerGetProdMetricsFlt', {
@@ -189,6 +191,7 @@ flt_container_get_prod_metrics_model = ns_ui_prod_metrics.model('ContainerGetPro
             'mest' : [32],
             'post_zuv' : [10],
             'ei' : [1],
+            'cat_product' : [7],
         }
     ),
     'filtertMiddleVolumeFrame2': fields.List(
@@ -200,7 +203,8 @@ flt_container_get_prod_metrics_model = ns_ui_prod_metrics.model('ContainerGetPro
             'sobstv' : [1],
             'mest' : [32],
             'post_zuv' : [0],
-            'ei' : [1]
+            'ei' : [1],
+            'cat_product' : [9],
         }
     ),
     'VariantColumns': fields.List(
