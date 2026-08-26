@@ -1580,6 +1580,11 @@ def get_exist_factory_collect(factory_id):
     res = {}
     fields_src_list =[
         {
+            'name': 'cat_product',
+            'default1': 7,
+            'default2': 9,
+        },
+        {
             'name': 'product',
             'default1' : 31,
             'default2' : 56,
@@ -1613,6 +1618,8 @@ def get_exist_factory_collect(factory_id):
     fields_list.insert(0,'type_raspr')
     fields_str = """
         pererab.tab_type_raspr_d816_4_ids as {},
+        category.id as {},
+        category.name as {},
         product.id as {},
         product.name as {},
         sobstv.id as {},
@@ -1634,6 +1641,7 @@ def get_exist_factory_collect(factory_id):
             tab_pererabotka_d816_4 as pererab
         LEFT JOIN tab_factory_d816_4 as factory ON pererab.tab_factory_d816_4_ids = factory.id
         LEFT JOIN tab_view_product_d816_4 as product ON pererab.tab_product_d816_4_ids = product.id
+        LEFT JOIN tab_category_product_d816_4 as category ON product.group_nom_real = category.id
         LEFT JOIN tab_sobstv_d816_4 as sobstv ON pererab.tab_sobstv_d816_4_ids = sobstv.id
         LEFT JOIN tab_mest_d816_4 as mest ON pererab.tab_mest_d816_4_ids = mest.id
         LEFT JOIN tab_post_zuv_d816_4 as post_zuv ON pererab.tab_post_zuv_d816_4_ids = post_zuv.id

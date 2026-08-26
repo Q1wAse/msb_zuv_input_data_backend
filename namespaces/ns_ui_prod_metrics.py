@@ -256,6 +256,7 @@ class ClsGetColumnData(Resource):
             v_selected_variant_compare = ns_ui_prod_metrics.payload.get('selectedVariantCompare')
             v_selected_factories = ns_ui_prod_metrics.payload.get('selectedFactories')
             v_variant_columns = ns_ui_prod_metrics.payload.get('VariantColumns')
+            v_filters_middle_volume_frame1 = ns_ui_prod_metrics.payload.get('filtertMiddleVolumeFrame1')
             v_filters_middle_volume_frame2 = ns_ui_prod_metrics.payload.get('filtertMiddleVolumeFrame2')
 
             if v_variant_columns:
@@ -263,7 +264,7 @@ class ClsGetColumnData(Resource):
                 return funcs_prod_metrics.get_calculated_dataset(
                     v_selected_variant_compare,
                     v_selected_factories,
-                    {},
+                    v_filters_middle_volume_frame1,
                     v_filters_middle_volume_frame2,
                     v_variant_columns
                 ), 200
