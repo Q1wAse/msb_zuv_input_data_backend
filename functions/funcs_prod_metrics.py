@@ -970,7 +970,6 @@ def _get_percent_output_by_formula(
 # =======================================================================================================================
 # Расчёт % выхода
 # =======================================================================================================================
-
 def get_list_percent_from_lists(
         list_base,
         list_slice,
@@ -1304,7 +1303,6 @@ def convert_data_to_tab_front(result, key_name, reverse_diff=True):
     final_res.sort(key=lambda row: (1 if 'name' not in row else 0, row.get('name', '')))
     return final_res
 #=======================================================================================================================
-
 def get_calc_volume(
         data_slice,
         product,
@@ -1788,7 +1786,7 @@ def get_calculated_dataset(selected_variant_compare,
         'value': cat_product
     }
 
-    if v_filters_middle_volume_frame1:
+    if v_filters_middle_volume_frame1 or v_filters_middle_volume_frame2:
         collection = {
             'panel_middle_month_volume_frame1': get_calc_volume(
                 'month',
@@ -1806,6 +1804,31 @@ def get_calculated_dataset(selected_variant_compare,
                 selected_variant_compare,
                 selected_factories,
                 variant_columns),
+            # Правый график с коэффициентами выхода
+            'panel_upper_month_volume_graph1': get_list_percent_from_lists(
+                get_calc_volume(
+                    'month',
+                    [],  #
+                    [7],  # Переработка
+                    v_filters_middle_volume_frame2 or {},
+                    selected_variant_compare,
+                    selected_factories,
+                    variant_columns,
+                    ei=1, ),  # тыс тонн (Единица измерения)
+                get_calc_volume(
+                    'month',
+                    [],
+                    [7],
+                    v_filters_middle_volume_frame2 or {},
+                    selected_variant_compare,
+                    selected_factories,
+                    variant_columns,
+                    ei=1,  # тыс тонн (Единица измерения)
+                ),
+                filters=v_filters_middle_volume_frame2 or {},
+                selected_factories=selected_factories,
+                variant_columns=variant_columns,
+                ei=1),
         }
     else:
         collection  = {
@@ -1846,32 +1869,6 @@ def get_calculated_dataset(selected_variant_compare,
                 selected_factories,
                 variant_columns,
                 ei=1, ),  # тыс тонн (Единица измерения)
-            # Правый график с коэффициентами выхода
-            'panel_upper_month_volume_graph1': get_list_percent_from_lists(
-                get_calc_volume(
-                    'month',
-                    [],  #
-                    [7],  # Переработка
-                    v_filters_middle_volume_frame2 or {},
-                    selected_variant_compare,
-                    selected_factories,
-                    variant_columns,
-                    ei=1, ),  # тыс тонн (Единица измерения)
-                get_calc_volume(
-                    'month',
-                    [],
-                    [7],
-                    v_filters_middle_volume_frame2 or {},
-                    selected_variant_compare,
-                    selected_factories,
-                    variant_columns,
-                    ei=1,  # тыс тонн (Единица измерения)
-                ),
-                filters=v_filters_middle_volume_frame2 or {},
-                selected_factories=selected_factories,
-                variant_columns=variant_columns,
-                ei=1
-            ),
             # Центральный левый график
             'panel_middle_month_volume_frame1': get_calc_volume(
                 'month',
