@@ -1,5 +1,8 @@
 from collections import defaultdict
 import datetime
+import re
+import ast
+import operator
 
 from sqlalchemy import text, inspect
 
@@ -113,7 +116,6 @@ def get_tab_name_check(name):
 #=================== Список категорий продукта ========================================================================================
 def get_product_categories():
     db = uf.get_db_connection()
-
     sql = text("""
         SELECT
             id,
@@ -122,9 +124,7 @@ def get_product_categories():
         FROM tab_category_product_d816_4
         ORDER BY ord
     """)
-
     result = db.execute(sql).fetchall()
-
     return [
         {
             'id': row.id,
@@ -133,10 +133,9 @@ def get_product_categories():
         }
         for row in result
     ]
-#========================================Продукты для определенной категории продукта
+#==============Продукты из выбранной категории продукта ================================================================
 def get_products_by_category(category_id):
     db = uf.get_db_connection()
-
     sql = text("""
         SELECT
             id,
@@ -146,14 +145,12 @@ def get_products_by_category(category_id):
         WHERE group_nom_real = :category_id
         ORDER BY name
     """)
-
     result = db.execute(
         sql,
         {
             'category_id': int(category_id)
         }
     ).fetchall()
-
     return [
         {
             'id': row.id,
@@ -264,26 +261,934 @@ def convert_data_to_tab_front_old(result, key_name, reverse_diff=True):
         #==============================================================
     return final_res
 #=======================================================================================================================
-def get_list_percent_from_lists(list_base,list_slice):
+# =======================================================================================================================
+# РАСЧЁТ КОЭФФИЦИЕНТА ВЫХОДА по формуле, которая хранится в tab_formula_koef_d816_4
+# =======================================================================================================================
+BS_COLUMN = "tab_bud_st_d816_4_ids" # id статей
+#=============== Преобразование value во float ============================
+def _safe_float(value, default=0.0):
+    if value is None:
+        return default
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+#=============== Формулы из tab_formula_koef_d816_4 =======================
+def _get_formula_rows(
+        factory_id,
+        category_product_id=None,
+        product_id=None,
+        ei_id=None
+):
+    """
+    Приоритет:
+        1. Формула конкретного продукта.
+        2. Формула категории продукта.
+    Фильтр по заводу и единице измерения.
+    """
+    db = uf.get_db_connection()
+    if not db:
+        return []
+    where_parts = [
+        "factory_id = :factory_id"
+    ]
+    params = {
+        "factory_id": int(factory_id)
+    }
+    if ei_id is not None:
+        where_parts.append("(ei = :ei_id OR ei IS NULL)")
+        params["ei_id"] = int(ei_id)
+
+    product_condition = ""
+    if product_id is not None:
+        product_condition = """
+            (
+                product_id = :product_id
+                OR
+                (
+                    product_id IS NULL
+                    AND category_product_id = :category_product_id
+                )
+            )
+        """
+        params["product_id"] = int(product_id)
+        params["category_product_id"] = (
+            int(category_product_id)
+            if category_product_id is not None
+            else -1
+        )
+
+    elif category_product_id is not None:
+        product_condition = """
+            product_id IS NULL
+            AND category_product_id = :category_product_id
+        """
+
+        params["category_product_id"] = int(category_product_id)
+
+    else:
+        return []
+
+    where_parts.append(product_condition)
+
+    sql = text(f"""
+        SELECT
+            id,
+            factory_id,
+            product_id,
+            category_product_id,
+            ei,
+            formula
+        FROM tab_formula_koef_d816_4
+        WHERE
+            {' AND '.join(where_parts)}
+        ORDER BY
+            CASE
+                WHEN product_id IS NOT NULL THEN 0
+                ELSE 1
+            END,
+            id
+    """)
+
+    return db.execute(sql, params).fetchall()
+
+#============= Получить бюджетные статьи из tab_map_bs_product_d816_4 ============
+def _get_mapping_budget_articles(
+        factory_id,
+        category_product_id=None,
+        product_id=None,
+        ei_id=None
+):
+    """
+    Обязательно:
+        type_raspr = 7
+    При наличии product_id сначала ищем соответствие конкретному продукту.
+    Если продукт не найден — используем соответствие категории.
+    """
+    db = uf.get_db_connection()
+    if not db:
+        return []
+
+    params = {
+        "factory_id": int(factory_id),
+        "type_raspr": 7
+    }
+
+    where_parts = [
+        "factory = :factory_id",
+        "type_raspr = :type_raspr"
+    ]
+
+    if ei_id is not None:
+        where_parts.append("ei_id = :ei_id")
+        params["ei_id"] = int(ei_id)
+
+    if product_id is not None:
+        product_condition = "id_product = :product_id"
+        params["product_id"] = int(product_id)
+
+        if category_product_id is not None:
+            product_condition = """
+                (
+                    id_product = :product_id
+                    OR
+                    (
+                        id_product IS NULL
+                        AND category_product_id = :category_product_id
+                    )
+                )
+            """
+            params["category_product_id"] = int(category_product_id)
+
+        where_parts.append(product_condition)
+
+    elif category_product_id is not None:
+        where_parts.append(
+            """
+            (
+                id_product IS NULL
+                AND category_product_id = :category_product_id
+            )
+            """
+        )
+        params["category_product_id"] = int(category_product_id)
+
+    else:
+        return []
+
+    sql = text(f"""
+        SELECT DISTINCT
+            id,
+            id_product,
+            category_product_id,
+            factory,
+            ei_id,
+            type_raspr
+        FROM tab_map_bs_product_d816_4
+        WHERE
+            {' AND '.join(where_parts)}
+        ORDER BY id
+    """)
+
+    return db.execute(sql, params).fetchall()
+# ===================== Выбрать формулу согласно правилам: ====================
+def _get_formula_for_selection(
+        factory_id,
+        category_product_id=None,
+        product_id=None,
+        ei_id=None
+):
+    """
+    Правила:
+    1. Категория + все продукты:
+       product_id IS NULL + category_product_id
+    2. Категория + один продукт:
+       если для продукта существует одна бюджетная статья,
+       используется формула продукта.
+    3. Категория + один продукт + несколько бюджетных статей:
+       используется формула категории.
+    """
+
+    formula_rows = _get_formula_rows(
+        factory_id=factory_id,
+        category_product_id=category_product_id,
+        product_id=product_id,
+        ei_id=ei_id
+    )
+    if not formula_rows:
+        return None
+    # --------------------------------------------------------------------------------
+    # Если пользователь выбрал категорию продукта, но не выбрал конкретный продукт -> используем формулу категории.
+    # --------------------------------------------------------------------------------
+    if product_id is None:
+
+        for row in formula_rows:
+            if (
+                row.product_id is None
+                and
+                category_product_id is not None
+                and
+                row.category_product_id == int(category_product_id)
+            ):
+                return row
+
+        return None
+
+    # --------------------------------------------------------------------------------
+    # Выбран конкретный продукт ->определить количество бюджетных статей.
+    # --------------------------------------------------------------------------------
+    mapping_rows = _get_mapping_budget_articles(
+        factory_id=factory_id,
+        category_product_id=category_product_id,
+        product_id=product_id,
+        ei_id=ei_id
+    )
+    # Оставляем только соответствия выбранному продукту.
+    product_mapping_rows = [
+        row
+        for row in mapping_rows
+        if row.id_product is not None
+        and int(row.id_product) == int(product_id)
+    ]
+
+    # Если для продукта одна статья — формула продукта.
+    if len(product_mapping_rows) == 1:
+        for row in formula_rows:
+            if (
+                row.product_id is not None
+                and int(row.product_id) == int(product_id)
+            ):
+                return row
+    # Если статей несколько — формула категории.
+    for row in formula_rows:
+        if (
+            row.product_id is None
+            and
+            category_product_id is not None
+            and
+            row.category_product_id == int(category_product_id)
+        ):
+            return row
+    return None
+
+#Получить значение конкретной бюджетной статьи из tab_pererabotka_d816_4
+
+def _get_budget_article_value(
+        factory_id,
+        budget_article_id,
+        ei_id,
+        variant_plan,
+        year,
+        month
+):
+    db = uf.get_db_connection()
+
+    if not db:
+        return 0.0
+
+    sql = text(f"""
+        SELECT
+            COALESCE(SUM(main.value), 0.0) AS value
+        FROM tab_pererabotka_d816_4 AS main
+        WHERE
+            main.{BS_COLUMN} = :budget_article_id
+            AND main.tab_type_raspr_d816_4_ids = 7
+            AND main.tab_factory_d816_4_ids = :factory_id
+            AND main.tab_ei_d816_4_ids = :ei_id
+            AND main.tab_var_plan_d816_4_ids = :variant_plan
+            AND main.year = :year
+            AND main.month = :month
+    """)
+
+    result = db.execute(
+        sql,
+        {
+            "budget_article_id": int(budget_article_id),
+            "factory_id": int(factory_id),
+            "ei_id": int(ei_id),
+            "variant_plan": int(variant_plan),
+            "year": int(year),
+            "month": int(month)
+        }
+    ).fetchone()
+
+    if not result:
+        return 0.0
+
+    return _safe_float(result.value)
+#    ============  Заменить ссылки на бюджетные статьи: {100331992:-1} на фактические значения из БД ================
+#    $100 = обычное число 100
+def _replace_formula_budget_references(
+        formula,
+        factory_id,
+        ei_id,
+        variant_plan,
+        year,
+        month,
+        coefficient_cache=None,
+        recursion_stack=None
+):
+    if coefficient_cache is None:
+        coefficient_cache = {}
+    if not formula:
+        return "0"
+    formula_text = str(formula).strip()
+    # --------------------------------------------------------------------------------
+    # {100331992:-1}, а значение бюджетной статьи берём из БД.
+    # --------------------------------------------------------------------------------
+    def replace_braced(match):
+        budget_article_id = int(match.group(1))
+
+        cache_key = (
+            "value",
+            budget_article_id,
+            factory_id,
+            ei_id,
+            variant_plan,
+            year,
+            month
+        )
+
+        if cache_key in coefficient_cache:
+            value = coefficient_cache[cache_key]
+        else:
+            value = _get_budget_article_value(
+                factory_id=factory_id,
+                budget_article_id=budget_article_id,
+                ei_id=ei_id,
+                variant_plan=variant_plan,
+                year=year,
+                month=month
+            )
+
+            coefficient_cache[cache_key] = value
+
+        return str(value)
+    formula_text = re.sub(
+        r"\{(\d+):-1\}",
+        replace_braced,
+        formula_text
+    )
+    # --------------------------------------------------------------------------------
+    # $100 -> 100  $6   -> 6
+    # --------------------------------------------------------------------------------
+    formula_text = re.sub(
+        r"\$(\d+(?:\.\d+)?)",
+        r"\1",
+        formula_text
+    )
+
+    return formula_text
+# Вычисление арифметического выражения
+def _safe_eval_arithmetic(expression):
+    """
+    Поддерживаются:
+        +
+        -
+        *
+        /
+        ()
+        числа
+    """
+    expression = expression.replace(",", ".")
+
+    tree = ast.parse(expression, mode="eval")
+
+    allowed_binary_operations = {
+        ast.Add: operator.add,
+        ast.Sub: operator.sub,
+        ast.Mult: operator.mul,
+        ast.Div: operator.truediv
+    }
+
+    allowed_unary_operations = {
+        ast.UAdd: operator.pos,
+        ast.USub: operator.neg
+    }
+
+    def evaluate(node):
+
+        if isinstance(node, ast.Expression):
+            return evaluate(node.body)
+
+        if isinstance(node, ast.Constant):
+            if isinstance(node.value, (int, float)):
+                return float(node.value)
+
+            raise ValueError(
+                f"Недопустимое значение в формуле: {node.value}"
+            )
+
+        if isinstance(node, ast.BinOp):
+            operation = allowed_binary_operations.get(type(node.op))
+
+            if operation is None:
+                raise ValueError(
+                    f"Недопустимая операция: {type(node.op).__name__}"
+                )
+
+            left = evaluate(node.left)
+            right = evaluate(node.right)
+
+            if isinstance(node.op, ast.Div) and right == 0:
+                return 0.0
+
+            return operation(left, right)
+
+        if isinstance(node, ast.UnaryOp):
+            operation = allowed_unary_operations.get(type(node.op))
+
+            if operation is None:
+                raise ValueError(
+                    f"Недопустимая унарная операция: "
+                    f"{type(node.op).__name__}"
+                )
+
+            return operation(evaluate(node.operand))
+
+        raise ValueError(
+            f"Недопустимый элемент формулы: "
+            f"{type(node).__name__}"
+        )
+
+    return evaluate(tree)
+# ===============Привести формулу из tab_formula_koef_d816_4 к арифметическому виду Python
+def _normalize_formula(formula):
+    """
+    Например:
+    ОКРУГЛ(
+        {100331992:-1}/{100335806:-1}*$100;
+        $6
+    )
+    превратить в:
+        round(<expression>, 6)
+    """
+    formula_text = str(formula).strip()
+
+    # Убираем ОКРУГЛ( ... ; ... )
+    round_match = re.match(
+        r"^\s*ОКРУГЛ\s*\((.*)\)\s*$",
+        formula_text,
+        flags=re.IGNORECASE
+    )
+
+    if round_match:
+
+        inner = round_match.group(1)
+
+        # В формуле разделитель аргументов ;
+        parts = inner.rsplit(";", 1)
+
+        if len(parts) == 2:
+
+            expression = parts[0].strip()
+            precision_text = parts[1].strip()
+
+            # В формулах используется $6 как количество знаков.
+            precision_text = precision_text.replace("$", "")
+
+            try:
+                precision = int(precision_text)
+            except ValueError:
+                precision = 6
+
+            return expression, precision
+
+    return formula_text, None
+
+def _calculate_formula(
+        formula,
+        factory_id,
+        ei_id,
+        variant_plan,
+        year,
+        month,
+        coefficient_cache=None
+):
+# ===========  Рассчитать одну формулу tab_formula_koef_d816_4.
+    if coefficient_cache is None:
+        coefficient_cache = {}
+
+    expression, precision = _normalize_formula(formula)
+
+    expression = _replace_formula_budget_references(
+        formula=expression,
+        factory_id=factory_id,
+        ei_id=ei_id,
+        variant_plan=variant_plan,
+        year=year,
+        month=month,
+        coefficient_cache=coefficient_cache
+    )
+
+    try:
+        value = _safe_eval_arithmetic(expression)
+    except Exception:
+        return 0.0
+
+    if precision is not None:
+        value = round(value, precision)
+
+    return value
+
+# Рассчитать коэффициент выхода бюджетной статьи. Используется для обработки ссылок вида $100
+def _calculate_budget_article_coefficient(
+        budget_article_id,
+        factory_id,
+        ei_id,
+        variant_plan,
+        year,
+        month,
+        coefficient_cache,
+        recursion_stack=None
+):
+    if recursion_stack is None:
+        recursion_stack = set()
+    db = uf.get_db_connection()
+    if not db:
+        return 0.0
+    # --------------------------------------------------------------------------------
+    # Ищем формулу для бюджетной статьи в tab_formula_koef_d816_4, где id = бюджетная статья.
+    # --------------------------------------------------------------------------------
+    sql = text("""
+        SELECT
+            id,
+            factory_id,
+            product_id,
+            category_product_id,
+            ei,
+            formula
+        FROM tab_formula_koef_d816_4
+        WHERE
+            id = :budget_article_id
+            AND factory_id = :factory_id
+            AND (ei = :ei_id OR ei IS NULL)
+        ORDER BY
+            CASE
+                WHEN ei = :ei_id THEN 0
+                ELSE 1
+            END,
+            CASE
+                WHEN product_id IS NOT NULL THEN 0
+                ELSE 1
+            END,
+            id
+        LIMIT 1
+    """)
+
+    row = db.execute(
+        sql,
+        {
+            "budget_article_id": int(budget_article_id),
+            "factory_id": int(factory_id),
+            "ei_id": int(ei_id)
+        }
+    ).fetchone()
+
+    # --------------------------------------------------------------------------------
+    # Если формулы для этой статьи нет, используем значение статьи.
+    # --------------------------------------------------------------------------------
+    if not row or not row.formula:
+        return _get_budget_article_value(
+            factory_id=factory_id,
+            budget_article_id=budget_article_id,
+            ei_id=ei_id,
+            variant_plan=variant_plan,
+            year=year,
+            month=month
+        )
+
+    return _calculate_formula(
+        formula=row.formula,
+        factory_id=factory_id,
+        ei_id=ei_id,
+        variant_plan=variant_plan,
+        year=year,
+        month=month,
+        coefficient_cache=coefficient_cache
+    )
+
+# Рассчитать коэффициент выхода для конкретного завода, варианта, года и месяца.
+def _calculate_output_coefficient(
+        formula_row,
+        factory_id,
+        ei_id,
+        variant_plan,
+        year,
+        month
+):
+    if not formula_row:
+        return 0.0
+
+    coefficient_cache = {}
+
+    return _calculate_formula(
+        formula=formula_row.formula,
+        factory_id=factory_id,
+        ei_id=ei_id,
+        variant_plan=variant_plan,
+        year=year,
+        month=month,
+        coefficient_cache=coefficient_cache
+    )
+
+# Получить category_product_id для продукта.
+def _get_category_for_product(product_id):
+    if product_id is None:
+        return None
+    db = uf.get_db_connection()
+    if not db:
+        return None
+    sql = text("""
+        SELECT
+            group_nom_real
+        FROM tab_view_product_d816_4
+        WHERE id = :product_id
+        LIMIT 1
+    """)
+    row = db.execute(
+        sql,
+        {
+            "product_id": int(product_id)
+        }
+    ).fetchone()
+    if not row:
+        return None
+    return row.group_nom_real
+
+# Главная функция получения коэффициента выхода.
+def _get_percent_output_by_formula(
+        factory_id,
+        category_product_id,
+        product_id,
+        ei_id,
+        variant_plan,
+        year,
+        month
+):
+    """
+    Правила выбора формулы:
+        - все продукты категории -> формула категории;
+        - один продукт + одна бюджетная статья -> формула продукта;
+        - один продукт + несколько бюджетных статей -> формула категории.
+    """
+
+    formula_row = _get_formula_for_selection(
+        factory_id=factory_id,
+        category_product_id=category_product_id,
+        product_id=product_id,
+        ei_id=ei_id
+    )
+
+    if not formula_row:
+        return None
+
+    return _calculate_output_coefficient(
+        formula_row=formula_row,
+        factory_id=factory_id,
+        ei_id=ei_id,
+        variant_plan=variant_plan,
+        year=year,
+        month=month
+    )
+# =======================================================================================================================
+# Расчёт % выхода
+# =======================================================================================================================
+
+def get_list_percent_from_lists(
+        list_base,
+        list_slice,
+        filters=None,
+        selected_factories=None,
+        variant_columns=None,
+        ei=1
+):
+    """
+    Расчёт процента выхода.
+    Если:
+        - выбран один завод;
+        - выбрана категория продукта;
+        - продукты не выбраны,
+
+    используется формула категории.
+    Если:
+        - выбран один завод;
+        - выбрана категория;
+        - выбран один продукт,
+
+    используется:
+        - формула продукта, если ему соответствует одна бюджетная статья;
+        - формула категории, если бюджетных статей несколько.
+
+    При отсутствии необходимых данных используется старая формула slice / base * 100
+    """
+
     result = []
-    if list_base and list_slice and len(list_base) == len(list_slice):
-        for i in range(0, len(list_base)):
-            con1 = (list_base[i].get('month', None) != None and
-                    list_base[i].get('variant1', None) != None and
-                    list_base[i].get('variant2', None) != None )
-            con2 = (list_slice[i].get('month', None) != None and
-                    list_slice[i].get('variant1', None) != None and
-                    list_slice[i].get('variant2', None) != None)
-            if con1 and con2:
-                v1_val1 = list_base[i].get('variant1', 0.0)
-                v1_val2 = list_slice[i].get('variant1', 0.0)
-                v2_val1 = list_base[i].get('variant2', 0.0)
-                v2_val2 = list_slice[i].get('variant2', 0.0)
-                result.append({
-                    'month' : list_base[i].get('month', 0),
-                    'variant1' : round( v1_val2 / v1_val1 * 100, 1)  if v1_val1 != 0 else 0.0,
-                    'variant2' : round( v2_val2 / v2_val1 * 100, 1)  if v2_val1 != 0 else 0.0
-                })
+
+    if not list_base or not list_slice:
+        return result
+
+    if len(list_base) != len(list_slice):
+        return result
+
+    filters = filters or {}
+    selected_factories = selected_factories or []
+    variant_columns = variant_columns or []
+
+    factory_list = [
+        int(factory_id)
+        for factory_id in selected_factories
+        if factory_id is not None
+    ]
+
+    # --------------------------------------------------------------------------------
+    # Формульный расчёт применяется только для одного выбранного завода.
+    # --------------------------------------------------------------------------------
+    use_formula = len(factory_list) == 1
+
+    factory_id = factory_list[0] if use_formula else None
+
+    category_list = [
+        int(category_id)
+        for category_id in filters.get("cat_product", [])
+        if category_id is not None
+    ]
+
+    product_list = [
+        int(product_id)
+        for product_id in filters.get("product", [])
+        if product_id is not None
+    ]
+
+    # --------------------------------------------------------------------------------
+    # Если выбрана категория, но продукты не выбраны,
+    # это означает "все продукты категории".
+    # --------------------------------------------------------------------------------
+    category_product_id = (
+        category_list[0]
+        if len(category_list) == 1
+        else None
+    )
+
+    product_id = (
+        product_list[0]
+        if len(product_list) == 1
+        else None
+    )
+
+    # Если выбрано несколько категорий или продуктов,
+    # однозначно выбрать формулу нельзя.
+    if len(category_list) != 1:
+        use_formula = False
+
+    if len(product_list) > 1:
+        use_formula = False
+
+    # --------------------------------------------------------------------------------
+    # Получаем variantPlaning и year для двух вариантов.
+    # --------------------------------------------------------------------------------
+    variant_data = {}
+
+    for idx, item in enumerate(variant_columns, start=1):
+
+        try:
+            variant_idx = int(idx)
+        except (TypeError, ValueError):
+            continue
+
+        if str(variant_idx) not in [
+            str(value) for value in filters.get(
+                "_selected_variant_compare",
+                []
+            )
+        ]:
+            continue
+
+        variant_data[variant_idx] = {
+            "variantPlaning": int(
+                item.get("variantPlaning", 0)
+            ),
+            "year": int(
+                item.get("year", 0)
+            )
+        }
+
+    # --------------------------------------------------------------------------------
+    # В текущей функции list_base/list_slice уже являются результатами
+    # variant1/variant2, поэтому variant_columns может не содержать
+    # selected_variant_compare.
+    #
+    # В этом случае определяем варианты по порядку.
+    # --------------------------------------------------------------------------------
+    if not variant_data:
+
+        for idx, item in enumerate(variant_columns, start=1):
+
+            if idx > 2:
+                break
+
+            variant_data[idx] = {
+                "variantPlaning": int(
+                    item.get("variantPlaning", 0)
+                ),
+                "year": int(
+                    item.get("year", 0)
+                )
+            }
+
+    # --------------------------------------------------------------------------------
+    # Основной цикл по месяцам.
+    # --------------------------------------------------------------------------------
+    for i in range(len(list_base)):
+
+        base_item = list_base[i]
+        slice_item = list_slice[i]
+
+        month = base_item.get(
+            "month",
+            slice_item.get("month")
+        )
+
+        if month is None:
+            continue
+
+        try:
+            month_int = int(month)
+        except (TypeError, ValueError):
+            continue
+
+        v1_base = _safe_float(
+            base_item.get("variant1", 0.0)
+        )
+
+        v1_slice = _safe_float(
+            slice_item.get("variant1", 0.0)
+        )
+
+        v2_base = _safe_float(
+            base_item.get("variant2", 0.0)
+        )
+
+        v2_slice = _safe_float(
+            slice_item.get("variant2", 0.0)
+        )
+
+        # --------------------------------------------------------------------------------
+        # Старый расчёт — fallback.
+        # --------------------------------------------------------------------------------
+        percent_v1 = (
+            round(v1_slice / v1_base * 100, 1)
+            if v1_base != 0
+            else 0.0
+        )
+
+        percent_v2 = (
+            round(v2_slice / v2_base * 100, 1)
+            if v2_base != 0
+            else 0.0
+        )
+
+        # --------------------------------------------------------------------------------
+        # Новый расчёт по формуле.
+        # --------------------------------------------------------------------------------
+        if use_formula and factory_id is not None:
+
+            # -----------------------------
+            # Вариант 1
+            # -----------------------------
+            variant1_formula_data = variant_data.get(1)
+
+            if variant1_formula_data:
+
+                percent_formula_v1 = _get_percent_output_by_formula(
+                    factory_id=factory_id,
+                    category_product_id=category_product_id,
+                    product_id=product_id,
+                    ei_id=ei,
+                    variant_plan=variant1_formula_data[
+                        "variantPlaning"
+                    ],
+                    year=variant1_formula_data["year"],
+                    month=month_int
+                )
+
+                if percent_formula_v1 is not None:
+                    percent_v1 = round(
+                        percent_formula_v1,
+                        1
+                    )
+
+            # -----------------------------
+            # Вариант 2
+            # -----------------------------
+            variant2_formula_data = variant_data.get(2)
+
+            if variant2_formula_data:
+
+                percent_formula_v2 = _get_percent_output_by_formula(
+                    factory_id=factory_id,
+                    category_product_id=category_product_id,
+                    product_id=product_id,
+                    ei_id=ei,
+                    variant_plan=variant2_formula_data[
+                        "variantPlaning"
+                    ],
+                    year=variant2_formula_data["year"],
+                    month=month_int
+                )
+
+                if percent_formula_v2 is not None:
+                    percent_v2 = round(
+                        percent_formula_v2,
+                        1
+                    )
+
+        result.append({
+            "month": month,
+            "variant1": percent_v1,
+            "variant2": percent_v2
+        })
+
     return result
 #=======================================================================================================================
 def convert_data_to_tab_front(result, key_name, reverse_diff=True):
@@ -809,7 +1714,7 @@ def get_calculated_dataset(selected_variant_compare,
                            v_filters_middle_volume_frame1,
                            v_filters_middle_volume_frame2,
                            variant_columns):
-    if v_filters_middle_volume_frame1 or v_filters_middle_volume_frame2:
+    if v_filters_middle_volume_frame1:
         collection = {
             'panel_middle_month_volume_frame1': get_calc_volume(
                 'month',
@@ -830,6 +1735,7 @@ def get_calculated_dataset(selected_variant_compare,
         }
     else:
         collection  = {
+            # Верхняя левая панель, где 4 карточки
             'panel_upper_year_volume_frame1' : get_calc_volume(
                 'year',
                 [64],  # Газ
@@ -838,7 +1744,7 @@ def get_calculated_dataset(selected_variant_compare,
                 selected_variant_compare,
                 selected_factories,
                 variant_columns,
-                ei=2, ),  # мл. м3 (Единица измерения)
+                ei=2, ),  # млн. м3 (Единица измерения)
             'panel_upper_year_volume_frame2': get_calc_volume(
                 'year',
                 [67],  # Нестабильный конденсат
@@ -866,26 +1772,33 @@ def get_calculated_dataset(selected_variant_compare,
                 selected_factories,
                 variant_columns,
                 ei=1, ),  # тыс тонн (Единица измерения)
+            # Правый график с коэффициентами выхода
             'panel_upper_month_volume_graph1': get_list_percent_from_lists(
                 get_calc_volume(
                     'month',
                     [],  #
-                    [5],  # Переработка
-                    {},
+                    [7],  # Переработка
+                    v_filters_middle_volume_frame2 or {},
                     selected_variant_compare,
                     selected_factories,
                     variant_columns,
                     ei=1, ),  # тыс тонн (Единица измерения)
                 get_calc_volume(
                     'month',
-                    [64],  # Газ
-                    [5],  # Переработка
-                    {},
+                    [],
+                    [7],
+                    v_filters_middle_volume_frame2 or {},
                     selected_variant_compare,
                     selected_factories,
                     variant_columns,
-                    ei=1, ),  # тыс тонн (Единица измерения)
+                    ei=1,  # тыс тонн (Единица измерения)
+                ),
+                filters=v_filters_middle_volume_frame2 or {},
+                selected_factories=selected_factories,
+                variant_columns=variant_columns,
+                ei=1
             ),
+            # Центральный левый график
             'panel_middle_month_volume_frame1': get_calc_volume(
                 'month',
                 [],  #
@@ -895,6 +1808,7 @@ def get_calculated_dataset(selected_variant_compare,
                 selected_factories,
                 variant_columns,
                 ei=1, ),  # тыс тонн (Единица измерения)
+            # Центральный правый график
             'panel_middle_month_volume_frame2': get_calc_volume(
                 'month',
                 [],  # Газ
@@ -904,6 +1818,7 @@ def get_calculated_dataset(selected_variant_compare,
                 selected_factories,
                 variant_columns,
                 ei=1, ),  # тыс тонн (Единица измерения)
+            # Левая таблица
             'panel_lower_month_volume_tab1': {
                 'ton' :
                     convert_data_to_tab_front(get_calc_volume(
@@ -926,6 +1841,7 @@ def get_calculated_dataset(selected_variant_compare,
                         variant_columns,
                         ei=2, ), 'tab_product_d816_4_ids'),
             },
+            # Правая таблица
             'panel_lower_month_volume_tab2': {
                 'ton' : convert_data_to_tab_front(get_calc_volume(
                     'tab_product_d816_4_ids',

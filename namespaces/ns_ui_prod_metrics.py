@@ -29,6 +29,7 @@ ns_ui_prod_metrics = Namespace('ns_ui_prod_metrics', description='UI(Statistics)
 
 #==============================================================================================================================
 #==============================================================================================================================
+# Получение структуры справчоников и фильтров
 @ns_ui_prod_metrics.route('/get_struct')
 class ClsStructDataProdMetrics(Resource):
     @ns_ui_prod_metrics.expect()
@@ -107,8 +108,6 @@ class ClsStructDataProdMetrics(Resource):
         except Exception as e:
             ns_ui_prod_metrics.abort(*errorhandler(e))
 #==============================================================================================================================
-#==============================================================================================================================
-
 variant_column_model = ns_ui_prod_metrics.model('VariantColumn', {
     'typeData': fields.String(description='Тип данных', required=True),
     'versionPlaning': fields.String(description='Версия планирования', required=True),
@@ -119,73 +118,6 @@ variant_column_model = ns_ui_prod_metrics.model('VariantColumn', {
         required=True
     )
 })
-
-main_container_get_prod_metrics_model = ns_ui_prod_metrics.model('ContainerGetProdMetrics', {
-    'selectedVariantCompare': fields.List(
-        fields.String,
-        description='Вариант сравнения',
-        required=True,
-        example=["1","2"]
-        # example=["1", "2", "3"]
-    ),
-    'selectedFactories': fields.List(
-        fields.String,
-        description='Список выбранных заводов',
-        required=True,
-        example=["1"]
-        # example=["1", "2", "3"]
-    ),
-    'VariantColumns': fields.List(
-        fields.Nested(variant_column_model),
-        description='Список колонок с параметрами',
-        required=True,
-        example=[
-            {
-                "typeData": "1",   #1 - План
-                "versionPlaning": "22600",
-                "variantPlaning" : "2260099",
-                "year": "2026"
-            },
-            {
-                "typeData": "1",   #1 - План
-                "versionPlaning": "22600",
-                "variantPlaning" : "2260010",
-                "year": "2026"
-            },
-            {
-                "typeData": "2",   #2 - факт
-                "year": "2026"
-            }
-        ]
-    )
-})
-
-@ns_ui_prod_metrics.route('/get_prod_metrics_main')
-class ClsGetColumnData(Resource):
-    @ns_ui_prod_metrics.expect(main_container_get_prod_metrics_model)
-    def post(self):
-        try:
-            uf.clear_loc_log()
-
-            v_selected_variant_compare = ns_ui_prod_metrics.payload.get('selectedVariantCompare')
-            v_selected_factories = ns_ui_prod_metrics.payload.get('selectedFactories')
-            v_variant_columns = ns_ui_prod_metrics.payload.get('VariantColumns')
-
-            if v_variant_columns:
-                v_selected_factories = [factory_id for factory_id in v_selected_factories]
-                return funcs_prod_metrics.get_calculated_dataset(
-                    v_selected_variant_compare,
-                    v_selected_factories,
-                    {},
-                    {},
-                    v_variant_columns
-                ), 200
-            else:
-                return uf.get_msg_struct(uf.EnumMsg.NO_SELECTED_COLUMNS)
-
-        except Exception as e:
-            ns_ui_prod_metrics.abort(*errorhandler(e))
-#==============================================================================================================================
 #==============================================================================================================================
 flt_middle_volume_model = ns_ui_prod_metrics.model('FltMiddleVolume', {
     'product': fields.List(fields.Integer,description='Продукт', required=False),
@@ -202,39 +134,37 @@ flt_container_get_prod_metrics_model = ns_ui_prod_metrics.model('ContainerGetPro
         description='Вариант сравнения',
         required=True,
         example=["1","2"]
-        # example=["1", "2", "3"]
     ),
     'selectedFactories': fields.List(
         fields.String,
         description='Список выбранных заводов',
         required=True,
-        example=["1"]
-        # example=["1", "2", "3"]
+        example=["7"]
     ),
-    'filtertMiddleVolumeFrame1': fields.List(
-        fields.Nested(flt_middle_volume_model),
+    'filtertMiddleVolumeFrame1': fields.Nested(
+        flt_middle_volume_model,
         description='Фильтр для центрального левого графика',
         required=True,
         example={
-            'product' : [31],
-            'sobstv' : [1],
-            'mest' : [32],
-            'post_zuv' : [10],
-            'ei' : [1],
-            'cat_product' : [7],
+            'product': [31],
+            'sobstv': [1],
+            'mest': [32],
+            'post_zuv': [10],
+            'ei': [1],
+            'cat_product': [7],
         }
     ),
-    'filtertMiddleVolumeFrame2': fields.List(
-        fields.Nested(flt_middle_volume_model),
-        description='Фильтр для центрального правого графика',
+    'filtertMiddleVolumeFrame2': fields.Nested(
+        flt_middle_volume_model,
+        description='Фильтр для правых графиков',
         required=True,
         example={
-            'product' : [7],
-            'sobstv' : [1],
-            'mest' : [32],
-            'post_zuv' : [0],
-            'ei' : [1],
-            'cat_product' : [9],
+            'product': [7],
+            'sobstv': [1],
+            'mest': [35],
+            'post_zuv': [0],
+            'ei': [1],
+            'cat_product': [9],
         }
     ),
     'VariantColumns': fields.List(
@@ -262,6 +192,87 @@ flt_container_get_prod_metrics_model = ns_ui_prod_metrics.model('ContainerGetPro
     )
 })
 
+#==============================================================================================================================
+main_container_get_prod_metrics_model = ns_ui_prod_metrics.model('ContainerGetProdMetrics', {
+    'selectedVariantCompare': fields.List(
+        fields.String,
+        description='Вариант сравнения',
+        required=True,
+        example=["1","2"]
+        # example=["1", "2", "3"]
+    ),
+    'selectedFactories': fields.List(
+        fields.String,
+        description='Список выбранных заводов',
+        required=True,
+        example=["1"]
+        # example=["1", "2", "3"]
+    ),
+    'filtertMiddleVolumeFrame2': fields.Nested(
+        flt_middle_volume_model,
+        description='Фильтр для правых графиков',
+        required=True,
+        example={
+            'product': [7],
+            'sobstv': [1],
+            'mest': [35],
+            'post_zuv': [0],
+            'ei': [1],
+            'cat_product': [9],
+        }
+    ),
+    'VariantColumns': fields.List(
+        fields.Nested(variant_column_model),
+        description='Список колонок с параметрами',
+        required=True,
+        example=[
+            {
+                "typeData": "1",   #1 - План
+                "versionPlaning": "22600",
+                "variantPlaning" : "2260099",
+                "year": "2026"
+            },
+            {
+                "typeData": "1",   #1 - План
+                "versionPlaning": "22600",
+                "variantPlaning" : "2260010",
+                "year": "2026"
+            },
+            {
+                "typeData": "2",   #2 - факт
+                "year": "2026"
+            }
+        ]
+    )
+})
+#=======================================================================================================================
+@ns_ui_prod_metrics.route('/get_prod_metrics_main')
+class ClsGetColumnData(Resource):
+    @ns_ui_prod_metrics.expect(main_container_get_prod_metrics_model)
+    def post(self):
+        try:
+            uf.clear_loc_log()
+
+            v_selected_variant_compare = ns_ui_prod_metrics.payload.get('selectedVariantCompare')
+            v_selected_factories = ns_ui_prod_metrics.payload.get('selectedFactories')
+            v_variant_columns = ns_ui_prod_metrics.payload.get('VariantColumns')
+            v_filters_middle_volume_frame2 = ns_ui_prod_metrics.payload.get('filtertMiddleVolumeFrame2')
+
+            if v_variant_columns:
+                v_selected_factories = [factory_id for factory_id in v_selected_factories]
+                return funcs_prod_metrics.get_calculated_dataset(
+                    v_selected_variant_compare,
+                    v_selected_factories,
+                    {},
+                    v_filters_middle_volume_frame2,
+                    v_variant_columns
+                ), 200
+            else:
+                return uf.get_msg_struct(uf.EnumMsg.NO_SELECTED_COLUMNS)
+
+        except Exception as e:
+            ns_ui_prod_metrics.abort(*errorhandler(e))
+#=======================================================================================================================
 @ns_ui_prod_metrics.route('/get_prod_metrics_flt')
 class ClsGetColumnDataFlt(Resource):
     @ns_ui_prod_metrics.expect(flt_container_get_prod_metrics_model)
