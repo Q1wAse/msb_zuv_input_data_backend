@@ -568,7 +568,30 @@ def _get_budget_article_value(
         FROM tab_pererabotka_d816_4 AS main
         WHERE
             main.{BS_COLUMN} = :budget_article_id
-            AND main.tab_type_raspr_d816_4_ids = 7
+            AND main.tab_type_raspr_d816_4_ids = (
+                SELECT main2.tab_type_raspr_d816_4_ids
+                FROM tab_pererabotka_d816_4 AS main2
+                WHERE
+                    main2.{BS_COLUMN} = :budget_article_id
+                    AND main2.tab_factory_d816_4_ids = :factory_id
+                    AND main2.tab_ei_d816_4_ids = :ei_id
+                    AND main2.tab_var_plan_d816_4_ids = :variant_plan
+                    AND main2.year = :year
+                    AND main2.month = :month
+                    AND main2.tab_type_raspr_d816_4_ids IN (7, 5, 6, 8, 9, 10, 11)
+                GROUP BY main2.tab_type_raspr_d816_4_ids
+                ORDER BY
+                    CASE main2.tab_type_raspr_d816_4_ids
+                        WHEN 7 THEN 1
+                        WHEN 5 THEN 2
+                        WHEN 6 THEN 3
+                        WHEN 8 THEN 4
+                        WHEN 9 THEN 5
+                        WHEN 10 THEN 6
+                        WHEN 11 THEN 7
+                    END
+                LIMIT 1
+            )
             AND main.tab_factory_d816_4_ids = :factory_id
             AND main.tab_ei_d816_4_ids = :ei_id
             AND main.tab_var_plan_d816_4_ids = :variant_plan
