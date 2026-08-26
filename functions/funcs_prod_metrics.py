@@ -1737,6 +1737,18 @@ def get_calculated_dataset(selected_variant_compare,
                            v_filters_middle_volume_frame1,
                            v_filters_middle_volume_frame2,
                            variant_columns):
+    cat_product = get_product_categories()
+
+    default_category_frame1 = next(
+        (item for item in cat_product if item.get('id') == 7),
+        None
+    )
+
+    default_category_frame2 = next(
+        (item for item in cat_product if item.get('id') == 2),
+        None
+    )
+
     if v_filters_middle_volume_frame1:
         collection = {
             'panel_middle_month_volume_frame1': get_calc_volume(
@@ -1887,6 +1899,32 @@ def get_calculated_dataset(selected_variant_compare,
             }
         }
         if len(selected_factories) == 1:
-            collection.update(get_exist_factory_collect(selected_factories[0]))
+            collection.update(
+                get_exist_factory_collect(selected_factories[0])
+            )
+
+            collection[
+                'panel_middle_month_volume_frame1_filter'
+            ]['cat_product'] = cat_product
+
+            collection[
+                'panel_middle_month_volume_frame2_filter'
+            ]['cat_product'] = cat_product
+
+            collection[
+                'panel_middle_month_volume_frame1_filter'
+            ]['product'] = (
+                get_products_by_category(default_category_frame1['id'])
+                if default_category_frame1
+                else []
+            )
+
+            collection[
+                'panel_middle_month_volume_frame2_filter'
+            ]['product'] = (
+                get_products_by_category(default_category_frame2['id'])
+                if default_category_frame2
+                else []
+            )
     return collection
 #=======================================================================================================================
