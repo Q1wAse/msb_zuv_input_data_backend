@@ -148,6 +148,27 @@ def get_product_categories():
         }
         for row in result
     ]
+#================== Категория по умолчанию ===========================
+def get_product_categories_with_default(default_category_id):
+    categories = get_product_categories()
+
+    default_category = next(
+        (
+            item
+            for item in categories
+            if item.get('id') == int(default_category_id)
+        ),
+        None
+    )
+
+    return {
+        'default': (
+            default_category['id']
+            if default_category
+            else None
+        ),
+        'value': categories
+    }
 #==============Продукты из выбранной категории продукта ================================================================
 def get_products_by_category(category_id):
     db = uf.get_db_connection()
@@ -1740,14 +1761,32 @@ def get_calculated_dataset(selected_variant_compare,
     cat_product = get_product_categories()
 
     default_category_frame1 = next(
-        (item for item in cat_product if item.get('id') == 7),
+        (
+            item
+            for item in cat_product
+            if item.get('id') == 7
+        ),
         None
     )
 
     default_category_frame2 = next(
-        (item for item in cat_product if item.get('id') == 2),
+        (
+            item
+            for item in cat_product
+            if item.get('id') == 2
+        ),
         None
     )
+
+    cat_product_frame1 = {
+        'default': 7,
+        'value': cat_product
+    }
+
+    cat_product_frame2 = {
+        'default': 2,
+        'value': cat_product
+    }
 
     if v_filters_middle_volume_frame1:
         collection = {
@@ -1903,28 +1942,8 @@ def get_calculated_dataset(selected_variant_compare,
                 get_exist_factory_collect(selected_factories[0])
             )
 
-            collection[
-                'panel_middle_month_volume_frame1_filter'
-            ]['cat_product'] = cat_product
+            collection['panel_middle_month_volume_frame1_filter']['cat_product'] = cat_product_frame1
+            collection['panel_middle_month_volume_frame2_filter']['cat_product'] = cat_product_frame2
 
-            collection[
-                'panel_middle_month_volume_frame2_filter'
-            ]['cat_product'] = cat_product
-
-            collection[
-                'panel_middle_month_volume_frame1_filter'
-            ]['product'] = (
-                get_products_by_category(default_category_frame1['id'])
-                if default_category_frame1
-                else []
-            )
-
-            collection[
-                'panel_middle_month_volume_frame2_filter'
-            ]['product'] = (
-                get_products_by_category(default_category_frame2['id'])
-                if default_category_frame2
-                else []
-            )
     return collection
 #=======================================================================================================================
