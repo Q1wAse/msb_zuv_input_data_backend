@@ -116,20 +116,35 @@ def get_tab_name_check(name):
 #=================== Список категорий продукта ========================================================================================
 def get_product_categories():
     db = uf.get_db_connection()
+
     sql = text("""
         SELECT
-            id,
-            name,
-            ord
-        FROM tab_category_product_d816_4
-        ORDER BY ord
+            category.id,
+            category.name,
+            category.ord,
+            COALESCE(
+                ARRAY_AGG(product.id ORDER BY product.name)
+                    FILTER (WHERE product.id IS NOT NULL),
+                ARRAY[]::INTEGER[]
+            ) AS product
+        FROM tab_category_product_d816_4 AS category
+        LEFT JOIN tab_view_product_d816_4 AS product
+            ON product.group_nom_real = category.id
+        GROUP BY
+            category.id,
+            category.name,
+            category.ord
+        ORDER BY category.ord
     """)
+
     result = db.execute(sql).fetchall()
+
     return [
         {
             'id': row.id,
             'name': row.name,
-            'ord': row.ord
+            'ord': row.ord,
+            'product': list(row.product or [])
         }
         for row in result
     ]
