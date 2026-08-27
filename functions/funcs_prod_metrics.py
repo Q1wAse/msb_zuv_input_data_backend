@@ -552,7 +552,6 @@ def _get_formula_for_selection(
 def _get_budget_article_value(
         factory_id,
         budget_article_id,
-        ei_id,
         variant_plan,
         year,
         month
@@ -562,49 +561,26 @@ def _get_budget_article_value(
     if not db:
         return 0.0
 
-    sql = text(f"""
+    sql = text("""
         SELECT
-            COALESCE(SUM(main.value), 0.0) AS value
-        FROM tab_pererabotka_d816_4 AS main
+            COALESCE(SUM(main.sum), 0.0) AS value
+        FROM tab_fm_zfm_get_preu_main_msb_zuv AS main
+        JOIN tab_factory_d816_4 AS factory
+            ON main.bcbim0002::integer = factory.id_ppasbu::integer
+            AND main.pj::integer = factory.bcbem0006::integer
         WHERE
-            main.{BS_COLUMN} = :budget_article_id
-            AND main.tab_type_raspr_d816_4_ids = (
-                SELECT main2.tab_type_raspr_d816_4_ids
-                FROM tab_pererabotka_d816_4 AS main2
-                WHERE
-                    main2.{BS_COLUMN} = :budget_article_id
-                    AND main2.tab_factory_d816_4_ids = :factory_id
-                    AND main2.tab_ei_d816_4_ids = :ei_id
-                    AND main2.tab_var_plan_d816_4_ids = :variant_plan
-                    AND main2.year = :year
-                    AND main2.month = :month
-                    AND main2.tab_type_raspr_d816_4_ids IN (7, 5, 6, 8, 9, 10, 11)
-                GROUP BY main2.tab_type_raspr_d816_4_ids
-                ORDER BY
-                    CASE main2.tab_type_raspr_d816_4_ids
-                        WHEN 7 THEN 1
-                        WHEN 5 THEN 2
-                        WHEN 6 THEN 3
-                        WHEN 8 THEN 4
-                        WHEN 9 THEN 5
-                        WHEN 10 THEN 6
-                        WHEN 11 THEN 7
-                    END
-                LIMIT 1
-            )
-            AND main.tab_factory_d816_4_ids = :factory_id
-            AND main.tab_ei_d816_4_ids = :ei_id
-            AND main.tab_var_plan_d816_4_ids = :variant_plan
-            AND main.year = :year
-            AND main.month = :month
+            factory.id = :factory_id
+            AND main.bs::integer = :budget_article_id
+            AND main.bcblm0002::integer = :variant_plan
+            AND main.calyear::integer = :year
+            AND main.calmonth::integer = :month
     """)
 
     result = db.execute(
         sql,
         {
-            "budget_article_id": int(budget_article_id),
             "factory_id": int(factory_id),
-            "ei_id": int(ei_id),
+            "budget_article_id": int(budget_article_id),
             "variant_plan": int(variant_plan),
             "year": int(year),
             "month": int(month)
@@ -654,7 +630,6 @@ def _replace_formula_budget_references(
             value = _get_budget_article_value(
                 factory_id=factory_id,
                 budget_article_id=budget_article_id,
-                ei_id=ei_id,
                 variant_plan=variant_plan,
                 year=year,
                 month=month
