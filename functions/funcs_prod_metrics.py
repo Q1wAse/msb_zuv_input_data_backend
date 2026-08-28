@@ -354,12 +354,12 @@ def _get_formula_rows(
             else -1
         )
 
+
     elif category_product_id is not None:
         product_condition = """
-            product_id IS NULL
-            AND category_product_id = :category_product_id
-        """
+            category_product_id = :category_product_id
 
+        """
         params["category_product_id"] = int(category_product_id)
 
     else:
@@ -477,12 +477,13 @@ def _get_formula_for_selection(
     """
     Правила:
     1. Категория + все продукты:
-       product_id IS NULL + category_product_id
+       - если для завода и категории есть ровно одна формула продукта,
+         использовать эту формулу для всей категории;
+       - иначе использовать формулу категории (product_id IS NULL).
     2. Категория + один продукт:
-       если для продукта существует одна бюджетная статья,
-       используется формула продукта.
-    3. Категория + один продукт + несколько бюджетных статей:
-       используется формула категории.
+       - если для продукта существует одна бюджетная статья,
+         используется формула продукта;
+       - если статей несколько — формула категории.
     """
 
     formula_rows = _get_formula_rows(
@@ -491,27 +492,46 @@ def _get_formula_for_selection(
         product_id=product_id,
         ei_id=ei_id
     )
+
     if not formula_rows:
         return None
+
     # --------------------------------------------------------------------------------
-    # Если пользователь выбрал категорию продукта, но не выбрал конкретный продукт -> используем формулу категории.
+    # Выбрана категория, но конкретный продукт НЕ выбран.
+    #
+    # Если для этой категории существует ровно одна строка формулы
+    # с product_id != NULL — используем эту формулу для всей группы.
     # --------------------------------------------------------------------------------
     if product_id is None:
 
+        product_formula_rows = [
+            row
+            for row in formula_rows
+            if (
+                row.product_id is not None
+                and category_product_id is not None
+                and row.category_product_id == int(category_product_id)
+            )
+        ]
+
+        # Для категории есть ровно одна формула продукта.
+        # Она считается общей формулой для всей группы.
+        if len(product_formula_rows) == 1:
+            return product_formula_rows[0]
+
+        # Иначе используем обычную формулу категории.
         for row in formula_rows:
             if (
                 row.product_id is None
-                and
-                category_product_id is not None
-                and
-                row.category_product_id == int(category_product_id)
+                and category_product_id is not None
+                and row.category_product_id == int(category_product_id)
             ):
                 return row
 
         return None
 
     # --------------------------------------------------------------------------------
-    # Выбран конкретный продукт ->определить количество бюджетных статей.
+    # Выбран конкретный продукт -> определить количество бюджетных статей.
     # --------------------------------------------------------------------------------
     mapping_rows = _get_mapping_budget_articles(
         factory_id=factory_id,
@@ -519,6 +539,7 @@ def _get_formula_for_selection(
         product_id=product_id,
         ei_id=ei_id
     )
+
     # Оставляем только соответствия выбранному продукту.
     product_mapping_rows = [
         row
@@ -535,16 +556,16 @@ def _get_formula_for_selection(
                 and int(row.product_id) == int(product_id)
             ):
                 return row
+
     # Если статей несколько — формула категории.
     for row in formula_rows:
         if (
             row.product_id is None
-            and
-            category_product_id is not None
-            and
-            row.category_product_id == int(category_product_id)
+            and category_product_id is not None
+            and row.category_product_id == int(category_product_id)
         ):
             return row
+
     return None
 
 #Получить значение конкретной бюджетной статьи из tab_pererabotka_d816_4
@@ -564,12 +585,13 @@ def _get_budget_article_value(
     sql = text("""
         SELECT
             COALESCE(SUM(main.sum), 0.0) AS value
-        FROM tab_fm_zfm_get_preu_main_msb_zuv AS main
+        FROM tab_fm_zbfm_get_preu_main_msb_zuv AS main
         JOIN tab_factory_d816_4 AS factory
             ON main.bcbim0002::integer = factory.id_ppasbu::integer
             AND main.pj::integer = factory.bcbem0006::integer
         WHERE
             factory.id = :factory_id
+            AND main.dbs::integer = 0
             AND main.bs::integer = :budget_article_id
             AND main.bcblm0002::integer = :variant_plan
             AND main.calyear::integer = :year
@@ -591,8 +613,20 @@ def _get_budget_article_value(
         return 0.0
 
     return _safe_float(result.value)
-#    ============  Заменить ссылки на бюджетные статьи: {100331992:-1} на фактические значения из БД ================
-#    $100 = обычное число 100
+# ============ Заменить ссылки на бюджетные статьи ============================
+# Поддерживаются:
+#   {100331992:-1}
+#   {100335432/1000:-1}
+#   {100335432*2:-1}
+#   {100335432/1000+100330002:-1}
+#
+# $100 -> 100
+# $6   -> 6
+#
+# Внутри { ... :-1 } числа длиной 6 и более символов считаются
+# идентификаторами бюджетных статей, а обычные числа, например 1000,
+# остаются обычными числовыми константами.
+
 def _replace_formula_budget_references(
         formula,
         factory_id,
@@ -605,47 +639,90 @@ def _replace_formula_budget_references(
 ):
     if coefficient_cache is None:
         coefficient_cache = {}
+
     if not formula:
         return "0"
+
     formula_text = str(formula).strip()
-    # --------------------------------------------------------------------------------
-    # {100331992:-1}, а значение бюджетной статьи берём из БД.
-    # --------------------------------------------------------------------------------
+
+    # -------------------------------------------------------------------------
+    # {100335432/1000:-1}
+    #
+    # Сначала обрабатываем содержимое фигурных скобок.
+    # Внутри скобок могут быть арифметические операции.
+    # -------------------------------------------------------------------------
     def replace_braced(match):
-        budget_article_id = int(match.group(1))
+        inner_expression = match.group(1).strip()
 
-        cache_key = (
-            "value",
-            budget_article_id,
-            factory_id,
-            ei_id,
-            variant_plan,
-            year,
-            month
-        )
+        # Ищем внутри выражения идентификаторы бюджетных статей.
+        #
+        # Например:
+        #   100335432/1000
+        #
+        # превратится в:
+        #   <значение статьи 100335432>/1000
+        #
+        # Числа длиной меньше 6 символов (1000, 2, 10 и т.д.)
+        # считаются обычными константами.
+        def replace_budget_id(id_match):
+            budget_article_id = int(id_match.group(0))
 
-        if cache_key in coefficient_cache:
-            value = coefficient_cache[cache_key]
-        else:
-            value = _get_budget_article_value(
-                factory_id=factory_id,
-                budget_article_id=budget_article_id,
-                variant_plan=variant_plan,
-                year=year,
-                month=month
+            cache_key = (
+                "value",
+                budget_article_id,
+                factory_id,
+                ei_id,
+                variant_plan,
+                year,
+                month
             )
 
-            coefficient_cache[cache_key] = value
+            if cache_key in coefficient_cache:
+                value = coefficient_cache[cache_key]
+            else:
+                value = _get_budget_article_value(
+                    factory_id=factory_id,
+                    budget_article_id=budget_article_id,
+                    variant_plan=variant_plan,
+                    year=year,
+                    month=month
+                )
 
-        return str(value)
+                coefficient_cache[cache_key] = value
+
+            return str(value)
+
+        # Бюджетные статьи у нас имеют длинные ID.
+        # Поэтому 100335432 заменяем, а 1000 оставляем числом.
+        inner_expression = re.sub(
+            r"\b\d{6,}\b",
+            replace_budget_id,
+            inner_expression
+        )
+
+        # Вычисляем арифметику внутри фигурных скобок.
+        try:
+            return str(_safe_eval_arithmetic(inner_expression))
+        except Exception:
+            return "0"
+
+    # -------------------------------------------------------------------------
+    # Обрабатываем:
+    #
+    #   {100331992:-1}
+    #   {100335432/1000:-1}
+    #   {100335432*2:-1}
+    # -------------------------------------------------------------------------
     formula_text = re.sub(
-        r"\{(\d+):-1\}",
+        r"\{([^{}]+):-1\}",
         replace_braced,
         formula_text
     )
-    # --------------------------------------------------------------------------------
-    # $100 -> 100  $6   -> 6
-    # --------------------------------------------------------------------------------
+
+    # -------------------------------------------------------------------------
+    # $100 -> 100
+    # $6   -> 6
+    # -------------------------------------------------------------------------
     formula_text = re.sub(
         r"\$(\d+(?:\.\d+)?)",
         r"\1",
@@ -653,6 +730,7 @@ def _replace_formula_budget_references(
     )
 
     return formula_text
+
 # Вычисление арифметического выражения
 def _safe_eval_arithmetic(expression):
     """
@@ -1052,9 +1130,6 @@ def get_list_percent_from_lists(
     # Если выбрано несколько категорий или продуктов,
     # однозначно выбрать формулу нельзя.
     if len(category_list) != 1:
-        use_formula = False
-
-    if len(product_list) > 1:
         use_formula = False
 
     # --------------------------------------------------------------------------------
@@ -1508,17 +1583,17 @@ def get_calc_volume(
                 v1_val = float(row.variant1)
                 v2_val = float(row.variant2)
                 if reverse_diff:
-                    diff_value = round(v2_val - v1_val, 1)
+                    diff_value = round(v2_val - v1_val, 5)
                     base_val = v2_val
                 else:
-                    diff_value = round(v1_val - v2_val, 1)
+                    diff_value = round(v1_val - v2_val, 5)
                     base_val = v1_val
                 res.append({
                     data_slice : mapping.get(data_slice, None),
-                    'variant1' : round(v1_val, 1),
-                    'variant2' : round(v2_val, 1),
-                    'deviation' : round(diff_value,1),
-                    'percents' : round((diff_value / base_val) * 100, 1) if base_val != 0 else 0.0,
+                    'variant1' : round(v1_val, 5),
+                    'variant2' : round(v2_val, 5),
+                    'deviation' : round(diff_value,5),
+                    'percents' : round((diff_value / base_val) * 100, 5) if base_val != 0 else 0.0,
                 })
             # Насыщаем коллекцию недостающими месяцами, если такие есть
             if data_slice == 'month':
