@@ -23,6 +23,7 @@ from flask_cors import CORS
 from msb_zuv_input_data_backend.namespaces.ns_input_map_bs_product import ns_input_data
 from msb_zuv_input_data_backend.namespaces.ns_download_report import ns_download_report
 from msb_zuv_input_data_backend.namespaces.ns_ui_prod_metrics import ns_ui_prod_metrics
+from msb_zuv_input_data_backend.namespaces.ns_mapping import ns_mapping
 from msb_zuv_input_data_backend.config import Config, changelog, secret_key
 from msb_zuv_input_data_backend.database import cache
 #===================================================================================================================
@@ -75,6 +76,7 @@ logger = logging.getLogger(__name__)
 api.add_namespace(ns_input_data, path='')
 api.add_namespace(ns_download_report, path='')
 api.add_namespace(ns_ui_prod_metrics, path='')
+api.add_namespace(ns_mapping, path='')
 #===================================================================================================================
 application = app
 

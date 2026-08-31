@@ -1590,10 +1590,10 @@ def get_calc_volume(
                     base_val = v1_val
                 res.append({
                     data_slice : mapping.get(data_slice, None),
-                    'variant1' : round(v1_val, 5),
-                    'variant2' : round(v2_val, 5),
-                    'deviation' : round(diff_value,5),
-                    'percents' : round((diff_value / base_val) * 100, 5) if base_val != 0 else 0.0,
+                    'variant1' : round(v1_val, 1),
+                    'variant2' : round(v2_val, 1),
+                    'deviation' : round(diff_value,1),
+                    'percents' : round((diff_value / base_val) * 100, 1) if base_val != 0 else 0.0,
                 })
             # Насыщаем коллекцию недостающими месяцами, если такие есть
             if data_slice == 'month':
