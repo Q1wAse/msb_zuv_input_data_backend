@@ -1,20 +1,131 @@
 from flask import request
-from flask_restx import Namespace, Resource
+from flask_restx import Namespace, Resource, fields
 from sqlalchemy import text
 from decimal import Decimal
 import datetime
 
 from msb_zuv_input_data_backend.database import cache, errorhandler
 import msb_zuv_input_data_backend.functions.utility_functions as uf
-
-
 # ======================================================================================================================
 # Namespace
 # ======================================================================================================================
-
 ns_mapping = Namespace(
     'mapping',
     description='API для ведения таблицы мэппинга'
+)
+# Модель JSON ля POST -запроса
+mapping_post_model = ns_mapping.model(
+    'MappingRowPost',
+    {
+        'id': fields.Integer(
+            required=True,
+            default=100330007,
+            description='Бюджетная статья'
+        ),
+        'article_name': fields.String(
+            required=False,
+            default='',
+            description='Наименование статьи'
+        ),
+        'product_id': fields.Integer(
+            required=True,
+            default=64
+        ),
+        'coefficient': fields.Float(
+            required=True,
+            default=1
+        ),
+        'factory_id': fields.Integer(
+            required=True,
+            default=1
+        ),
+        'distribution_type_id': fields.Integer(
+            required=False,
+            default=9
+        ),
+        'owner_id': fields.Integer(
+            required=False,
+            default=1
+        ),
+        'field_id': fields.Integer(
+            required=False,
+            default=32
+        ),
+        'product_category_id': fields.Integer(
+            required=True,
+            default=2
+        ),
+        'supplier_id': fields.Integer(
+            required=False,
+            default=10
+        ),
+        'unit_id': fields.Integer(
+            required=True,
+            default=1
+        ),
+        'year': fields.Integer(
+            required=True,
+            default=2099
+        )
+    }
+)
+# Модель JSON ля PUT -запроса
+mapping_put_model = ns_mapping.model(
+    'MappingRowPut',
+    {
+        'id_str': fields.String(
+            required=True,
+            description='Уникальный идентификатор строки мэппинга'
+        ),
+        'id': fields.Integer(
+            required=True,
+            description='Неизменяемый ID бюджетной статьи'
+        ),
+        'article_name': fields.String(
+            required=False,
+            description='Наименование статьи'
+        ),
+        'product_id': fields.Integer(
+            required=True,
+            description='Продукт'
+        ),
+        'coefficient': fields.Float(
+            required=True,
+            description='Неизменяемый коэффициент'
+        ),
+        'factory_id': fields.Integer(
+            required=True,
+            description='Неизменяемое предприятие'
+        ),
+        'distribution_type_id': fields.Integer(
+            required=True,
+            description='Неизменяемый тип распределения'
+        ),
+        'owner_id': fields.Integer(
+            required=False,
+            description='Собственник'
+        ),
+        'field_id': fields.Integer(
+            required=False,
+            description='Месторождение / поле'
+        ),
+        'product_category_id': fields.Integer(
+            required=False,
+            description='Автоматически определяется по продукту'
+        ),
+        'supplier_id': fields.Integer(
+            required=False,
+            description='Поставщик'
+        ),
+        'unit_id': fields.Integer(
+            required=True,
+            description='Единица измерения'
+        ),
+        'year': fields.Integer(
+            required=True,
+            description='Неизменяемый год'
+        )
+    }
 )
 # ======================================================================================================================
 # Вспомогательные функции
@@ -31,7 +142,6 @@ def _to_int(value, field_name):
 def _to_float(value, field_name):
     if value is None or value == '':
         raise ValueError(f'Поле {field_name} обязательно')
-
     try:
         return float(value)
     except (TypeError, ValueError):
@@ -39,7 +149,6 @@ def _to_float(value, field_name):
 def _to_id(value):
     if value is None:
         return None
-
     try:
         return int(value)
     except (TypeError, ValueError):
@@ -64,7 +173,7 @@ def _get_dictionary(
         order_by='name'
 ):
     """
-    Получить простой справочник:
+    Получить простой справочник со структурой:
         [
             {
                 "id": 1,
@@ -172,12 +281,7 @@ class MappingStructure(Resource):
             product_categories = _get_product_categories()
             years = _get_years()
             # ----------------------------------------------------------------------------------
-            # form_lines
-            # Пока возвращаем пустой список.
-            # ----------------------------------------------------------------------------------
-            form_lines = []
-            # ----------------------------------------------------------------------------------
-            # last_update
+            # last_update - пока в таблице поле пустое
             # ----------------------------------------------------------------------------------
             last_update_sql = text("""
                 SELECT
@@ -207,7 +311,6 @@ class MappingStructure(Resource):
                     else last_update
                 ),
                 'references': {
-                    'form_lines': form_lines,
                     'products': products,
                     'coefficients': _get_coefficients(),
                     'factories': factories,
@@ -229,7 +332,6 @@ class MappingStructure(Resource):
 def _validate_mapping_data(data):
     if not isinstance(data, dict):
         raise ValueError('Тело запроса должно быть JSON-объектом')
-
     # Обязательные поля
     required_fields = [
         'id',
@@ -247,6 +349,11 @@ def _validate_mapping_data(data):
             )
     result = {
         'id': _to_int(data.get('id'), 'id'),
+        'article_name': (
+            data.get('article_name')
+            if data.get('article_name') is not None
+            else ''
+        ),
         'koef': _to_float(
             data.get('coefficient'),
             'coefficient'
@@ -414,6 +521,7 @@ class MappingRows(Resource):
                     ON post.id = map.post_id
                 LEFT JOIN tab_ei_d816_4 AS ei
                     ON ei.id = map.ei_id
+                WHERE map.factory > 0
                 ORDER BY
                     map.id,
                     map.factory,
@@ -422,19 +530,13 @@ class MappingRows(Resource):
             """)
 
             rows = db.execute(sql).fetchall()
-
             items = []
 
             for row in rows:
                 items.append({
                     'id': row.id,
 
-                    'article': {
-                        'id': row.id,
-                        'label': row.article_name
-                    } if row.article_name is not None else None,
-
-                    'form_line': None,
+                    'article_name': row.article_name,
 
                     'product': {
                         'id': row.id_product,
@@ -492,6 +594,7 @@ class MappingRows(Resource):
         except Exception as e:
             ns_mapping.abort(*errorhandler(e))
 
+    @ns_mapping.expect(mapping_post_model, validate=True)
     def post(self):
         try:
             data = request.get_json(silent=True)
@@ -532,6 +635,7 @@ class MappingRows(Resource):
             insert_sql = text("""
                 INSERT INTO tab_map_bs_product_d816_4 (
                     id,
+                    name,
                     koef,
                     factory,
                     id_product,
@@ -546,6 +650,7 @@ class MappingRows(Resource):
                 )
                 VALUES (
                     :id,
+                    :article_name,
                     :koef,
                     :factory,
                     :id_product,
@@ -594,103 +699,323 @@ class MappingRows(Resource):
 # ======================================================================================================================
 # 3. PUT + DELETE /mapping/rows/{mapping_id}
 # ======================================================================================================================
-@ns_mapping.route('/rows/<int:mapping_id>')
+@ns_mapping.route('/rows/<string:id_str>')
 class MappingRowsUpdate(Resource):
 
-    def put(self, mapping_id):
+    @ns_mapping.expect(mapping_put_model, validate=True)
+
+    def put(self, id_str):
         try:
-            data = request.get_json(silent=True)
+            data = request.get_json(force=True, silent=False)
 
-            mapping = _validate_mapping_data(data)
+            if not isinstance(data, dict):
+                raise ValueError(
+                    'Тело запроса должно быть JSON-объектом'
+                )
 
-            # В PUT id берём из URL.
-            mapping['id'] = mapping_id
+            json_id_str = data.get('id_str')
 
-            _validate_references(mapping)
+            if not json_id_str:
+                raise ValueError(
+                    'Поле id_str обязательно'
+                )
 
+            json_id_str = str(json_id_str)
+
+            # id_str из URL и JSON должны совпадать
+            if json_id_str != str(id_str):
+                raise ValueError(
+                    'id_str в URL и id_str в JSON должны совпадать'
+                )
             db = _get_db()
-
-            # Проверяем существование строки
-            check_sql = text("""
-                SELECT 1
+            select_sql = text("""
+                SELECT
+                    id,
+                    koef,
+                    factory,
+                    type_raspr,
+                    year,
+                    id_str
                 FROM tab_map_bs_product_d816_4
-                WHERE id = :id
+                WHERE id_str = :id_str
                 LIMIT 1
             """)
 
             existing = db.execute(
-                check_sql,
-                {'id': mapping_id}
+                select_sql,
+                {
+                    'id_str': json_id_str
+                }
             ).fetchone()
 
             if not existing:
                 return {
                     'code': 'validation_error',
-                    'message': 'Строка мэппинга не найдена'
+                    'message': (
+                        f'Строка мэппинга с id_str={json_id_str} не найдена'
+                    )
                 }, 404
 
-            id_str = _generate_id_str(
-                mapping_id=mapping['id'],
-                factory_id=mapping['factory'],
-                type_raspr_id=mapping.get('type_raspr') or 0,
-                year=mapping['year']
+            # ----------------------------------------------------------------------------------
+            # Неизменяемые поля
+            # ----------------------------------------------------------------------------------
+
+            if 'id' not in data:
+                raise ValueError(
+                    'Поле id обязательно'
+                )
+
+            if int(data['id']) != int(existing.id):
+                raise ValueError(
+                    'Поле id является неизменяемым'
+                )
+
+            if 'factory_id' not in data:
+                raise ValueError(
+                    'Поле factory_id обязательно'
+                )
+
+            if int(data['factory_id']) != int(existing.factory):
+                raise ValueError(
+                    'Поле factory_id является неизменяемым'
+                )
+
+            if 'distribution_type_id' not in data:
+                raise ValueError(
+                    'Поле distribution_type_id обязательно'
+                )
+
+            json_type_raspr = _to_id(
+                data.get('distribution_type_id')
             )
 
-            # Не допускаем дубль id_str
-            duplicate_sql = text("""
-                SELECT 1
-                FROM tab_map_bs_product_d816_4
-                WHERE id_str = :id_str
-                  AND id <> :id
+            if json_type_raspr != existing.type_raspr:
+                raise ValueError(
+                    'Поле distribution_type_id является неизменяемым'
+                )
+
+            if 'year' not in data:
+                raise ValueError(
+                    'Поле year обязательно'
+                )
+
+            if int(data['year']) != int(existing.year):
+                raise ValueError(
+                    'Поле year является неизменяемым'
+                )
+
+            if 'coefficient' not in data:
+                raise ValueError(
+                    'Поле coefficient обязательно'
+                )
+
+            json_coefficient = _to_float(
+                data.get('coefficient'),
+                'coefficient'
+            )
+
+            existing_coefficient = (
+                float(existing.koef)
+                if existing.koef is not None
+                else None
+            )
+
+            if (
+                existing_coefficient is not None
+                and json_coefficient != existing_coefficient
+            ):
+                raise ValueError(
+                    'Поле coefficient является неизменяемым'
+                )
+
+            product_id = _to_int(
+                data.get('product_id'),
+                'product_id'
+            )
+
+            product_sql = text("""
+                SELECT
+                    id,
+                    group_nom_real
+                FROM tab_view_product_d816_4
+                WHERE id = :id
                 LIMIT 1
             """)
-
-            duplicate = db.execute(
-                duplicate_sql,
+            product = db.execute(
+                product_sql,
                 {
-                    'id_str': id_str,
-                    'id': mapping_id
+                    'id': product_id
                 }
             ).fetchone()
 
-            if duplicate:
-                return {
-                    'code': 'validation_error',
-                    'message': (
-                        f'Мэппинг с id_str={id_str} уже существует'
-                    )
-                }, 400
+            if not product:
+                raise ValueError(
+                    f'Продукт с id={product_id} не найден'
+                )
+            # product_category_id определяется автоматически из tab_view_product_d816_4.group_nom_real
+            if product.group_nom_real is None:
+                raise ValueError(
+                    f'Для продукта с id={product_id} '
+                    f'не определена группа group_name'
+                )
 
+            category_sql = text("""
+                SELECT
+                    id, name
+                FROM tab_category_product_d816_4
+                WHERE id = :group_nom_real
+                LIMIT 1
+            """)
+
+            category = db.execute(
+                category_sql,
+                {
+                    'group_nom_real': product.group_nom_real
+                }
+            ).fetchone()
+
+            if not category:
+                raise ValueError(
+                    f'Категория продукта "{product.group_nom_real}" '
+                    f'не найдена в tab_category_product_d816_4'
+                )
+
+            product_category_id = category.id
+
+            # Изменяемые справочники
+            owner_id = _to_id(
+                data.get('owner_id')
+            )
+
+            field_id = _to_id(
+                data.get('field_id')
+            )
+
+            supplier_id = _to_id(
+                data.get('supplier_id')
+            )
+
+            unit_id = _to_int(
+                data.get('unit_id'),
+                'unit_id'
+            )
+
+            reference_checks = [
+                (
+                    'unit_id',
+                    'tab_ei_d816_4',
+                    unit_id
+                )
+            ]
+
+            optional_checks = [
+                (
+                    'owner_id',
+                    'tab_sobstv_d816_4',
+                    owner_id
+                ),
+                (
+                    'field_id',
+                    'tab_mest_d816_4',
+                    field_id
+                ),
+                (
+                    'supplier_id',
+                    'tab_post_zuv_d816_4',
+                    supplier_id
+                )
+            ]
+
+            reference_checks.extend(
+                item
+                for item in optional_checks
+                if item[2] is not None
+            )
+
+            for field_name, table_name, value in reference_checks:
+
+                reference_sql = text(f"""
+                    SELECT 1
+                    FROM {table_name}
+                    WHERE id = :id
+                    LIMIT 1
+                """)
+
+                reference = db.execute(
+                    reference_sql,
+                    {
+                        'id': value
+                    }
+                ).fetchone()
+
+                if not reference:
+                    raise ValueError(
+                        f'Значение {value} для поля {field_name} '
+                        f'не найдено в справочнике {table_name}'
+                    )
+
+            article_name = data.get('article_name')
+
+            if article_name is None:
+                article_name = ''
+
+            # ----------------------------------------------------------------------------------
+            # UPDATE
+            #
+            # Изменяются ТОЛЬКО:
+            # name
+            # id_product
+            # sobstv
+            # mest
+            # post_id
+            # ei_id
+            # category_product_id
+            #
+            # НЕ изменяются:
+            # id
+            # koef
+            # factory
+            # type_raspr
+            # year
+            # id_str
+            # ----------------------------------------------------------------------------------
             update_sql = text("""
                 UPDATE tab_map_bs_product_d816_4
                 SET
-                    koef = :koef,
-                    factory = :factory,
+                    name = :article_name,
                     id_product = :id_product,
-                    type_raspr = :type_raspr,
                     sobstv = :sobstv,
                     mest = :mest,
-                    category_product_id = :category_product_id,
                     post_id = :post_id,
                     ei_id = :ei_id,
-                    year = :year,
-                    id_str = :id_str
-                WHERE id = :id
+                    category_product_id = :category_product_id
+                WHERE id_str = :id_str
             """)
 
-            db.execute(
+            result = db.execute(
                 update_sql,
                 {
-                    **mapping,
-                    'id_str': id_str
+                    'article_name': article_name,
+                    'id_product': product_id,
+                    'sobstv': owner_id,
+                    'mest': field_id,
+                    'post_id': supplier_id,
+                    'ei_id': unit_id,
+                    'category_product_id': product_category_id,
+                    'id_str': json_id_str
                 }
             )
 
             db.commit()
 
+            # ----------------------------------------------------------------------------------
+            # Возвращаем обновлённую строку
+            # ----------------------------------------------------------------------------------
             return {
-                'id': mapping_id,
-                'id_str': id_str
+                'id': existing.id,
+                'id_str': existing.id_str,
+                'product_id': product_id,
+                'product_category_id': product_category_id
             }, 200
 
         except ValueError as e:
@@ -699,7 +1024,7 @@ class MappingRowsUpdate(Resource):
                 'message': str(e)
             }, 400
 
-        except Exception:
+        except Exception as e:
             try:
                 db.rollback()
             except Exception:
@@ -709,20 +1034,24 @@ class MappingRowsUpdate(Resource):
                 'code': 'validation_error',
                 'message': 'Не удалось сохранить данные'
             }, 400
-    def delete(self, mapping_id):
+
+    def delete(self, id_str):
         try:
             db = _get_db()
 
+            # Проверяем существование строки по id_str
             check_sql = text("""
                 SELECT 1
                 FROM tab_map_bs_product_d816_4
-                WHERE id = :id
+                WHERE id_str = :id_str
                 LIMIT 1
             """)
 
             existing = db.execute(
                 check_sql,
-                {'id': mapping_id}
+                {
+                    'id_str': id_str
+                }
             ).fetchone()
 
             if not existing:
@@ -731,20 +1060,24 @@ class MappingRowsUpdate(Resource):
                     'message': 'Строка мэппинга не найдена'
                 }, 404
 
+            # DELETE по id_str
             delete_sql = text("""
                 DELETE FROM tab_map_bs_product_d816_4
-                WHERE id = :id
+                WHERE id_str = :id_str
             """)
 
             db.execute(
                 delete_sql,
-                {'id': mapping_id}
+                {
+                    'id_str': id_str
+                }
             )
 
             db.commit()
 
             return {
-                'message': 'Строка удалена'
+                'message': 'Строка удалена',
+                'id_str': id_str
             }, 200
 
         except Exception:
@@ -789,9 +1122,7 @@ class MappingProductsDictionary(Resource):
 
             db = _get_db()
 
-            # ----------------------------------------------------------------------------------
             # CREATE
-            # ----------------------------------------------------------------------------------
             for item in create_list:
 
                 if not isinstance(item, dict):
@@ -822,10 +1153,7 @@ class MappingProductsDictionary(Resource):
                     }
                 )
 
-            # ----------------------------------------------------------------------------------
             # UPDATE
-            # ----------------------------------------------------------------------------------
-
             for item in update_list:
 
                 if not isinstance(item, dict):
@@ -860,9 +1188,7 @@ class MappingProductsDictionary(Resource):
                     }
                 )
 
-            # ----------------------------------------------------------------------------------
             # DELETE
-            # ----------------------------------------------------------------------------------
 
             for product_id in delete_ids:
 
