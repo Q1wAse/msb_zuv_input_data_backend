@@ -197,6 +197,53 @@ mapping_products_patch_model = ns_mapping.model(
         )
     }
 )
+# Модель JSON для PATCH справочников Собственник, Месторождение, Поставщик
+mapping_dictionary_patch_model = ns_mapping.model(
+    'MappingDictionaryPatch',
+    {
+        'create': fields.List(
+            fields.Nested(
+                ns_mapping.model(
+                    'MappingDictionaryCreate',
+                    {
+                        'name': fields.String(
+                            required=True,
+                            description='Наименование нового элемента справочника'
+                        )
+                    }
+                )
+            ),
+            required=False,
+            description='Элементы для создания'
+        ),
+
+        'update': fields.List(
+            fields.Nested(
+                ns_mapping.model(
+                    'MappingDictionaryUpdate',
+                    {
+                        'id': fields.Integer(
+                            required=True,
+                            description='ID элемента справочника'
+                        ),
+                        'name': fields.String(
+                            required=True,
+                            description='Новое наименование'
+                        )
+                    }
+                )
+            ),
+            required=False,
+            description='Элементы для изменения'
+        ),
+
+        'delete_ids': fields.List(
+            fields.Integer,
+            required=False,
+            description='ID элементов для удаления'
+        )
+    }
+)
 # ======================================================================================================================
 # Вспомогательные функции
 # ======================================================================================================================
@@ -1580,6 +1627,342 @@ class MappingProductsDictionary(Resource):
                     db.rollback()
             except Exception:
                 pass
+            return {
+                'code': 'validation_error',
+                'message': 'Не удалось сохранить данные'
+            }, 400
+
+# ======================================================================================================================
+# 5. PATCH /mapping/dictionaries/{dictionary} -  Для Собственник, Месторождение и Поставщик
+# ======================================================================================================================
+@ns_mapping.route('/dictionaries/<string:dictionary>')
+class MappingDictionary(Resource):
+
+    @ns_mapping.expect(mapping_dictionary_patch_model, validate=True)
+    def patch(self, dictionary):
+        """
+        Создание, изменение и удаление элементов справочников:
+        owners    -> tab_sobstv_d816_4
+        fields    -> tab_mest_d816_4
+        suppliers -> tab_post_zuv_d816_4
+        """
+        dictionary_config = {
+            'owners': {
+                'table': 'tab_sobstv_d816_4',
+                'name': 'Собственник'
+            },
+            'fields': {
+                'table': 'tab_mest_d816_4',
+                'name': 'Месторождение'
+            },
+            'suppliers': {
+                'table': 'tab_post_zuv_d816_4',
+                'name': 'Поставщик'
+            }
+        }
+
+        if dictionary not in dictionary_config:
+            return {
+                'code': 'validation_error',
+                'message': (
+                    f'Неизвестный справочник "{dictionary}". '
+                    f'Допустимые значения: owners, fields, suppliers'
+                )
+            }, 400
+
+        config = dictionary_config[dictionary]
+        table_name = config['table']
+        dictionary_name = config['name']
+
+        db = None
+        try:
+            data = request.get_json(force=True, silent=False)
+
+            if not isinstance(data, dict):
+                raise ValueError(
+                    'Тело запроса должно быть JSON'
+                )
+            create_list = data.get('create', [])
+            update_list = data.get('update', [])
+            delete_ids = data.get('delete_ids', [])
+            # Проверка структуры PATCH
+            if not isinstance(create_list, list):
+                raise ValueError(
+                    'Поле create должно быть массивом'
+                )
+
+            if not isinstance(update_list, list):
+                raise ValueError(
+                    'Поле update должно быть массивом'
+                )
+
+            if not isinstance(delete_ids, list):
+                raise ValueError(
+                    'Поле delete_ids должно быть массивом'
+                )
+
+            db = _get_db()
+            # CREATE
+            created = []
+
+            for item in create_list:
+
+                if not isinstance(item, dict):
+                    raise ValueError(
+                        'Элемент create должен быть JSON-объектом'
+                    )
+
+                name = item.get('name')
+
+                if name is None or str(name).strip() == '':
+                    raise ValueError(
+                        f'Для создания элемента справочника "{dictionary_name}" '
+                        f'поле name обязательно'
+                    )
+
+                name = str(name).strip()
+
+                # Проверяем, что такого названия ещё нет
+                exists_sql = text(f"""
+                    SELECT
+                        id,
+                        name
+                    FROM {table_name}
+                    WHERE name = :name
+                    LIMIT 1
+                """)
+
+                exists = db.execute(
+                    exists_sql,
+                    {
+                        'name': name
+                    }
+                ).fetchone()
+
+                if exists:
+                    raise ValueError(
+                        f'{dictionary_name} с наименованием "{name}" '
+                        f'уже существует, id={exists.id}'
+                    )
+                # Новый id
+                next_id_sql = text(f"""
+                    SELECT
+                        COALESCE(MAX(id), 0) + 1 AS next_id
+                    FROM {table_name}
+                """)
+
+                next_id_row = db.execute(next_id_sql).fetchone()
+
+                new_id = int(next_id_row.next_id)
+
+                # INSERT
+                insert_sql = text(f"""
+                    INSERT INTO {table_name} (
+                        id,
+                        name
+                    )
+                    VALUES (
+                        :id,
+                        :name
+                    )
+                """)
+
+                db.execute(
+                    insert_sql,
+                    {
+                        'id': new_id,
+                        'name': name
+                    }
+                )
+
+                created.append({
+                    'id': new_id,
+                    'name': name
+                })
+            # UPDATE
+            updated = []
+
+            for item in update_list:
+
+                if not isinstance(item, dict):
+                    raise ValueError(
+                        'Элемент update должен быть JSON'
+                    )
+
+                product_id = item.get('id')
+
+                if product_id is None or product_id == '':
+                    raise ValueError(
+                        f'Для изменения элемента справочника "{dictionary_name}" '
+                        f'поле id обязательно'
+                    )
+
+                try:
+                    item_id = int(product_id)
+                except (TypeError, ValueError):
+                    raise ValueError(
+                        'Поле id должно быть числом'
+                    )
+
+                name = item.get('name')
+
+                if name is None or str(name).strip() == '':
+                    raise ValueError(
+                        f'Для изменения элемента справочника "{dictionary_name}" '
+                        f'поле name обязательно'
+                    )
+
+                name = str(name).strip()
+
+                select_sql = text(f"""
+                    SELECT
+                        id,
+                        name
+                    FROM {table_name}
+                    WHERE id = :id
+                    LIMIT 1
+                """)
+
+                existing = db.execute(
+                    select_sql,
+                    {
+                        'id': item_id
+                    }
+                ).fetchone()
+
+                if not existing:
+                    raise ValueError(
+                        f'{dictionary_name} с id={item_id} не найден'
+                    )
+                # Проверяем дубликат имени
+                duplicate_sql = text(f"""
+                    SELECT
+                        id
+                    FROM {table_name}
+                    WHERE name = :name
+                      AND id <> :id
+                    LIMIT 1
+                """)
+
+                duplicate = db.execute(
+                    duplicate_sql,
+                    {
+                        'name': name,
+                        'id': item_id
+                    }
+                ).fetchone()
+
+                if duplicate:
+                    raise ValueError(
+                        f'{dictionary_name} с наименованием "{name}" '
+                        f'уже существует, id={duplicate.id}'
+                    )
+                # UPDATE
+                update_sql = text(f"""
+                    UPDATE {table_name}
+                    SET
+                        name = :name
+                    WHERE id = :id
+                """)
+
+                db.execute(
+                    update_sql,
+                    {
+                        'id': item_id,
+                        'name': name
+                    }
+                )
+
+                updated.append({
+                    'id': item_id,
+                    'name': name
+                })
+            # DELETE
+            deleted = []
+
+            for value in delete_ids:
+
+                if value is None or value == '':
+                    raise ValueError(
+                        f'ID элемента справочника "{dictionary_name}" '
+                        f'для удаления не может быть пустым'
+                    )
+
+                try:
+                    item_id = int(value)
+                except (TypeError, ValueError):
+                    raise ValueError(
+                        'ID элемента для удаления должен быть числом'
+                    )
+
+                select_sql = text(f"""
+                    SELECT
+                        id,
+                        name
+                    FROM {table_name}
+                    WHERE id = :id
+                    LIMIT 1
+                """)
+
+                existing = db.execute(
+                    select_sql,
+                    {
+                        'id': item_id
+                    }
+                ).fetchone()
+
+                if not existing:
+                    raise ValueError(
+                        f'{dictionary_name} с id={item_id} не найден'
+                    )
+                # DELETE
+                delete_sql = text(f"""
+                    DELETE FROM {table_name}
+                    WHERE id = :id
+                """)
+
+                db.execute(
+                    delete_sql,
+                    {
+                        'id': item_id
+                    }
+                )
+
+                deleted.append({
+                    'id': item_id,
+                    'name': existing.name
+                })
+            # COMMIT
+            db.commit()
+            return {
+                'message': f'Справочник "{dictionary_name}" обновлён',
+                'dictionary': dictionary,
+                'created': created,
+                'updated': updated,
+                'deleted': deleted
+            }, 200
+
+        except ValueError as e:
+
+            try:
+                if db:
+                    db.rollback()
+            except Exception:
+                pass
+
+            return {
+                'code': 'validation_error',
+                'message': str(e)
+            }, 400
+
+        except Exception as e:
+
+            try:
+                if db:
+                    db.rollback()
+            except Exception:
+                pass
+
             return {
                 'code': 'validation_error',
                 'message': 'Не удалось сохранить данные'
