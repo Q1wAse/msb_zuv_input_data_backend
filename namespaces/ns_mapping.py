@@ -127,6 +127,76 @@ mapping_put_model = ns_mapping.model(
         )
     }
 )
+
+# Модель JSON для PATCH справочника продуктов
+mapping_products_patch_model = ns_mapping.model(
+    'MappingProductsPatch',
+    {
+        'create': fields.List(
+            fields.Nested(
+                ns_mapping.model(
+                    'MappingProductCreate',
+                    {
+                        'name': fields.String(
+                            required=True,
+                            description='Наименование нового продукта'
+                        ),
+                        'category_id': fields.Integer(
+                            required=True,
+                            description='Категория продукта из tab_category_product_d816_4'
+                        )
+                    }
+                )
+            ),
+            required=False,
+            default=[
+                {
+                    'name': 'Новый продукт',
+                    'category_id': 2
+                }
+            ],
+            description='Продукты для создания'
+        ),
+
+        'update': fields.List(
+            fields.Nested(
+                ns_mapping.model(
+                    'MappingProductUpdate',
+                    {
+                        'id': fields.Integer(
+                            required=True,
+                            description='ID продукта'
+                        ),
+                        'name': fields.String(
+                            required=True,
+                            description='Новое наименование продукта'
+                        ),
+                        'category_id': fields.Integer(
+                            required=True,
+                            description='Категория продукта из tab_category_product_d816_4'
+                        )
+                    }
+                )
+            ),
+            required=False,
+            default=[
+                {
+                    'id': 100000001,
+                    'name': 'Изменённый продукт',
+                    'category_id': 2
+                }
+            ],
+            description='Продукты для изменения'
+        ),
+
+        'delete_ids': fields.List(
+            fields.Integer,
+            required=False,
+            default=[100000001],
+            description='ID продуктов для удаления'
+        )
+    }
+)
 # ======================================================================================================================
 # Вспомогательные функции
 # ======================================================================================================================
@@ -331,7 +401,7 @@ class MappingStructure(Resource):
 # ======================================================================================================================
 def _validate_mapping_data(data):
     if not isinstance(data, dict):
-        raise ValueError('Тело запроса должно быть JSON-объектом')
+        raise ValueError('Тело запроса должно быть JSON')
     # Обязательные поля
     required_fields = [
         'id',
@@ -710,7 +780,7 @@ class MappingRowsUpdate(Resource):
 
             if not isinstance(data, dict):
                 raise ValueError(
-                    'Тело запроса должно быть JSON-объектом'
+                    'Тело запроса должно быть JSON'
                 )
 
             json_id_str = data.get('id_str')
@@ -856,7 +926,7 @@ class MappingRowsUpdate(Resource):
             if product.group_nom_real is None:
                 raise ValueError(
                     f'Для продукта с id={product_id} '
-                    f'не определена группа group_name'
+                    f'не определена группа group_nom_real'
                 )
 
             category_sql = text("""
@@ -1090,30 +1160,45 @@ class MappingRowsUpdate(Resource):
                 'code': 'validation_error',
                 'message': 'Не удалось удалить данные'
             }, 400
+
+
 # ======================================================================================================================
 # 4. PATCH /mapping/dictionaries/products
 # ======================================================================================================================
 @ns_mapping.route('/dictionaries/products')
 class MappingProductsDictionary(Resource):
-
+    @ns_mapping.expect(mapping_products_patch_model, validate=True)
     def patch(self):
+        """
+        Создание, изменение и удаление продуктов.
+        Изменять можно ТОЛЬКО записи таблицы tab_product_pererabotka_d816_4
+        Записи table_st_nom_zuv являются неизменяемыми.
+        tab_view_product_d816_4 используется только для отображения полного справочника продуктов.
+        """
+
+        db = None
         try:
-            data = request.get_json(silent=True)
+            data = request.get_json(force=True, silent=False)
 
             if not isinstance(data, dict):
                 raise ValueError(
-                    'Тело запроса должно быть JSON-объектом'
+                    'Тело запроса должно быть JSON'
                 )
 
             create_list = data.get('create', [])
             update_list = data.get('update', [])
             delete_ids = data.get('delete_ids', [])
 
+            # Проверка структуры PATCH
             if not isinstance(create_list, list):
-                raise ValueError('Поле create должно быть массивом')
+                raise ValueError(
+                    'Поле create должно быть массивом'
+                )
 
             if not isinstance(update_list, list):
-                raise ValueError('Поле update должно быть массивом')
+                raise ValueError(
+                    'Поле update должно быть массивом'
+                )
 
             if not isinstance(delete_ids, list):
                 raise ValueError(
@@ -1121,107 +1206,380 @@ class MappingProductsDictionary(Resource):
                 )
 
             db = _get_db()
-
             # CREATE
+            created = []
+
             for item in create_list:
 
                 if not isinstance(item, dict):
                     raise ValueError(
-                        'Элемент create должен быть объектом'
+                        'Элемент create должен быть JSON-объектом'
                     )
 
                 name = item.get('name')
 
-                if not name:
+                if name is None or str(name).strip() == '':
                     raise ValueError(
                         'Для создания продукта поле name обязательно'
                     )
 
-                sql = text("""
-                    INSERT INTO tab_view_product_d816_4 (
+                category_id = item.get('category_id')
+
+                if category_id is None or category_id == '':
+                    raise ValueError(
+                        'Для создания продукта поле category_id обязательно'
+                    )
+
+                try:
+                    category_id = int(category_id)
+                except (TypeError, ValueError):
+                    raise ValueError(
+                        'Поле category_id должно быть числом'
+                    )
+                # Проверяем категорию
+                category_sql = text("""
+                    SELECT
+                        id,
                         name
+                    FROM tab_category_product_d816_4
+                    WHERE id = :id
+                    LIMIT 1
+                """)
+
+                category = db.execute(
+                    category_sql,
+                    {
+                        'id': category_id
+                    }
+                ).fetchone()
+
+                if not category:
+                    raise ValueError(
+                        f'Категория продукта с id={category_id} '
+                        f'не найдена в tab_category_product_d816_4'
+                    )
+
+                aggr_level = item.get('aggr_level', 0)
+
+                if aggr_level is None or aggr_level == '':
+                    aggr_level = 0
+
+                try:
+                    aggr_level = int(aggr_level)
+                except (TypeError, ValueError):
+                    raise ValueError(
+                        'Поле aggr_level должно быть числом'
+                    )
+
+                # ID должен быть следующим номером после максимального ID из tab_view_product_d816_4.
+                next_id_sql = text("""
+                    SELECT COALESCE(MAX(id), 0) + 1 AS next_id
+                    FROM tab_view_product_d816_4
+                """)
+
+                next_id_row = db.execute(next_id_sql).fetchone()
+                product_id = int(next_id_row.next_id)
+
+                exists_sql = text("""
+                    SELECT 1
+                    FROM tab_view_product_d816_4
+                    WHERE id = :id
+                    LIMIT 1
+                """)
+
+                exists = db.execute(
+                    exists_sql,
+                    {
+                        'id': product_id
+                    }
+                ).fetchone()
+
+                if exists:
+                    raise ValueError(
+                        f'ID продукта {product_id} уже существует'
+                    )
+                # INSERT только в tab_product_pererabotka_d816_4
+
+                insert_sql = text("""
+                    INSERT INTO tab_product_pererabotka_d816_4 (
+                        id,
+                        name,
+                        category_id,
+                        aggr_level
                     )
                     VALUES (
-                        :name
+                        :id,
+                        :name,
+                        :category_id,
+                        NULL
                     )
                 """)
 
                 db.execute(
-                    sql,
+                    insert_sql,
                     {
-                        'name': name
+                        'id': product_id,
+                        'name': str(name).strip(),
+                        'category_id': category_id,
+                        'aggr_level': aggr_level
                     }
                 )
 
+                created.append({
+                    'id': product_id,
+                    'name': str(name).strip(),
+                    'category_id': category_id,
+                    'category_name': category.name,
+                    'aggr_level': aggr_level
+                })
             # UPDATE
+            updated = []
             for item in update_list:
 
                 if not isinstance(item, dict):
                     raise ValueError(
-                        'Элемент update должен быть объектом'
+                        'Элемент update должен быть JSON'
                     )
 
                 product_id = item.get('id')
-                name = item.get('name')
 
-                if product_id is None:
+                if product_id is None or product_id == '':
                     raise ValueError(
                         'Для изменения продукта поле id обязательно'
                     )
 
-                if not name:
+                try:
+                    product_id = int(product_id)
+                except (TypeError, ValueError):
+                    raise ValueError(
+                        'Поле id должно быть числом'
+                    )
+
+                name = item.get('name')
+
+                if name is None or str(name).strip() == '':
                     raise ValueError(
                         'Для изменения продукта поле name обязательно'
                     )
 
-                sql = text("""
-                    UPDATE tab_view_product_d816_4
-                    SET name = :name
+                category_id = item.get('category_id')
+
+                if category_id is None or category_id == '':
+                    raise ValueError(
+                        'Для изменения продукта поле category_id обязательно'
+                    )
+
+                try:
+                    category_id = int(category_id)
+                except (TypeError, ValueError):
+                    raise ValueError(
+                        'Поле category_id должно быть числом'
+                    )
+
+                # Проверяем, что продукт существует именно в tab_product_pererabotka_d816_4, а не в table_st_nom_zuv
+                product_sql = text("""
+                    SELECT
+                        id,
+                        name,
+                        category_id,
+                        aggr_level
+                    FROM tab_product_pererabotka_d816_4
+                    WHERE id = :id
+                    LIMIT 1
+                """)
+
+                product = db.execute(
+                    product_sql,
+                    {
+                        'id': product_id
+                    }
+                ).fetchone()
+
+                if not product:
+                    # Проверяем, существует ли он вообще в полном справочнике.
+                    check_view_sql = text("""
+                        SELECT 1
+                        FROM tab_view_product_d816_4
+                        WHERE id = :id
+                        LIMIT 1
+                    """)
+
+                    exists_in_view = db.execute(
+                        check_view_sql,
+                        {
+                            'id': product_id
+                        }
+                    ).fetchone()
+
+                    if exists_in_view:
+                        raise ValueError(
+                            f'Продукт с id={product_id} является '
+                            f'неизменяемым и не может быть изменён'
+                        )
+
+                    raise ValueError(
+                        f'Продукт с id={product_id} не найден'
+                    )
+                # Проверяем категорию
+                category_sql = text("""
+                    SELECT
+                        id,
+                        name
+                    FROM tab_category_product_d816_4
+                    WHERE id = :id
+                    LIMIT 1
+                """)
+
+                category = db.execute(
+                    category_sql,
+                    {
+                        'id': category_id
+                    }
+                ).fetchone()
+
+                if not category:
+                    raise ValueError(
+                        f'Категория продукта с id={category_id} '
+                        f'не найдена в tab_category_product_d816_4'
+                    )
+
+                aggr_level = item.get(
+                    'aggr_level',
+                    product.aggr_level
+                )
+
+                if aggr_level is None or aggr_level == '':
+                    aggr_level = 0
+
+                try:
+                    aggr_level = int(aggr_level)
+                except (TypeError, ValueError):
+                    raise ValueError(
+                        'Поле aggr_level должно быть числом'
+                    )
+                # UPDATE
+                update_sql = text("""
+                    UPDATE tab_product_pererabotka_d816_4
+                    SET
+                        name = :name,
+                        category_id = :category_id,
+                        aggr_level = NULL
                     WHERE id = :id
                 """)
 
                 db.execute(
-                    sql,
+                    update_sql,
                     {
-                        'id': int(product_id),
-                        'name': name
+                        'id': product_id,
+                        'name': str(name).strip(),
+                        'category_id': category_id,
                     }
                 )
 
+                updated.append({
+                    'id': product_id,
+                    'name': str(name).strip(),
+                    'category_id': category_id,
+                    'category_name': category.name,
+                })
             # DELETE
+            deleted = []
 
             for product_id in delete_ids:
 
-                sql = text("""
+                if product_id is None or product_id == '':
+                    raise ValueError(
+                        'ID продукта для удаления не может быть пустым'
+                    )
+
+                try:
+                    product_id = int(product_id)
+                except (TypeError, ValueError):
+                    raise ValueError(
+                        'ID продукта для удаления должен быть числом'
+                    )
+                # Удаляем ТОЛЬКО из изменяемой таблицы.
+                product_sql = text("""
+                    SELECT id
+                    FROM tab_product_pererabotka_d816_4
+                    WHERE id = :id
+                    LIMIT 1
+                """)
+
+                product = db.execute(
+                    product_sql,
+                    {
+                        'id': product_id
+                    }
+                ).fetchone()
+
+                if not product:
+
+                    check_view_sql = text("""
+                        SELECT 1
+                        FROM tab_view_product_d816_4
+                        WHERE id = :id
+                        LIMIT 1
+                    """)
+
+                    exists_in_view = db.execute(
+                        check_view_sql,
+                        {
+                            'id': product_id
+                        }
+                    ).fetchone()
+
+                    if exists_in_view:
+                        raise ValueError(
+                            f'Продукт с id={product_id} является '
+                            f'неизменяемым и не может быть удалён'
+                        )
+
+                    raise ValueError(
+                        f'Продукт с id={product_id} не найден'
+                    )
+
+                delete_sql = text("""
                     DELETE FROM tab_product_pererabotka_d816_4
                     WHERE id = :id
                 """)
 
                 db.execute(
-                    sql,
+                    delete_sql,
                     {
-                        'id': int(product_id)
+                        'id': product_id
                     }
                 )
 
+                deleted.append(product_id)
+            # COMMIT
             db.commit()
-
+            # RESPONSE
             return {
-                'message': 'Справочник продуктов обновлён'
+                'message': 'Справочник продуктов обновлён',
+                'created': created,
+                'updated': updated,
+                'deleted': deleted
             }, 200
 
         except ValueError as e:
+            try:
+                if db:
+                    db.rollback()
+            except Exception:
+                pass
+
             return {
                 'code': 'validation_error',
                 'message': str(e)
             }, 400
 
-        except Exception:
+        except Exception as e:
             try:
-                db.rollback()
+                if db:
+                    db.rollback()
             except Exception:
                 pass
-
             return {
                 'code': 'validation_error',
                 'message': 'Не удалось сохранить данные'
