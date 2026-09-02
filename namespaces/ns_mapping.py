@@ -7,7 +7,7 @@ import datetime
 from msb_zuv_input_data_backend.database import cache, errorhandler
 import msb_zuv_input_data_backend.functions.utility_functions as uf
 # ======================================================================================================================
-# Namespace
+# Namespace МОДЕЛИ
 # ======================================================================================================================
 ns_mapping = Namespace(
     'mapping',
@@ -21,11 +21,6 @@ mapping_post_model = ns_mapping.model(
             required=True,
             default=100330007,
             description='Бюджетная статья'
-        ),
-        'article_name': fields.String(
-            required=False,
-            default='',
-            description='Наименование статьи'
         ),
         'product_id': fields.Integer(
             required=True,
@@ -75,11 +70,7 @@ mapping_put_model = ns_mapping.model(
     {
         'id': fields.Integer(
             required=True,
-            description='ID бюджетной статьи'
-        ),
-        'article_name': fields.String(
-            required=False,
-            description='Наименование статьи'
+            description='ID бюджетной статьи из tab_bud_st_d816_4'
         ),
         'product_id': fields.Integer(
             required=True,
@@ -373,6 +364,39 @@ def _get_product_categories():
         }
         for row in rows
     ]
+def _get_budget_article(article_id):
+    """
+    Проверяет существование бюджетной статьи в tab_bud_st_d816_4
+    и возвращает её наименование.
+
+    id мэппинга должен ссылаться именно на
+    tab_bud_st_d816_4.id.
+    """
+    db = _get_db()
+
+    sql = text("""
+        SELECT
+            id,
+            name
+        FROM tab_bud_st_d816_4
+        WHERE id = :id
+        LIMIT 1
+    """)
+
+    row = db.execute(
+        sql,
+        {
+            'id': article_id
+        }
+    ).fetchone()
+
+    if not row:
+        raise ValueError(
+            f'Бюджетная статья с id={article_id} '
+            f'не существует в tab_bud_st_d816_4'
+        )
+
+    return row
 # ======================================================================================================================
 # 1. GET /mapping/structure
 # ======================================================================================================================
@@ -445,7 +469,7 @@ class MappingStructure(Resource):
 def _validate_mapping_data(data):
     if not isinstance(data, dict):
         raise ValueError('Тело запроса должно быть JSON')
-    # Обязательные поля
+
     required_fields = [
         'id',
         'coefficient',
@@ -455,38 +479,41 @@ def _validate_mapping_data(data):
         'unit_id',
         'year'
     ]
+
     for field_name in required_fields:
         if field_name not in data or data[field_name] in (None, ''):
             raise ValueError(
                 f'Поле {field_name} обязательно'
             )
+
     result = {
         'id': _to_int(data.get('id'), 'id'),
-        'article_name': (
-            data.get('article_name')
-            if data.get('article_name') is not None
-            else ''
-        ),
+
         'koef': _to_float(
             data.get('coefficient'),
             'coefficient'
         ),
+
         'factory': _to_int(
             data.get('factory_id'),
             'factory_id'
         ),
+
         'id_product': _to_int(
             data.get('product_id'),
             'product_id'
         ),
+
         'category_product_id': _to_int(
             data.get('product_category_id'),
             'product_category_id'
         ),
+
         'ei_id': _to_int(
             data.get('unit_id'),
             'unit_id'
         ),
+
         'year': _to_int(
             data.get('year'),
             'year'
@@ -495,22 +522,46 @@ def _validate_mapping_data(data):
         'type_raspr': _to_id(
             data.get('distribution_type_id')
         ),
+
         'sobstv': _to_id(
             data.get('owner_id')
         ),
+
         'mest': _to_id(
             data.get('field_id')
         ),
+
         'post_id': _to_id(
             data.get('supplier_id')
         )
     }
+
     return result
 # ======================================================================================================================
 # Проверка существования ссылочных значений
 # ======================================================================================================================
 def _validate_references(data):
     db = _get_db()
+
+    article_sql = text("""
+            SELECT 1
+            FROM tab_bud_st_d816_4
+            WHERE id = :id
+            LIMIT 1
+        """)
+
+    article = db.execute(
+        article_sql,
+        {
+            'id': data['id']
+        }
+    ).fetchone()
+
+    if not article:
+        raise ValueError(
+            f'Бюджетная статья с id={data["id"]} '
+            f'не существует в tab_bud_st_d816_4'
+        )
 
     checks = [
         (
@@ -608,7 +659,7 @@ class MappingRows(Resource):
                     map.ei_id,
                     map.year,
                     map.id_str,
-                    map.name AS article_name,
+                    article.name AS article_name,
                     product.name AS product_name,
                     factory.name AS factory_name,
                     type_raspr.name AS type_raspr_name,
@@ -618,6 +669,8 @@ class MappingRows(Resource):
                     post.name AS post_name,
                     ei.name AS ei_name
                 FROM tab_map_bs_product_d816_4 AS map
+                LEFT JOIN tab_bud_st_d816_4 AS article
+                    ON article.id = map.id
                 LEFT JOIN tab_view_product_d816_4 AS product
                     ON product.id = map.id_product
                 LEFT JOIN tab_factory_d816_4 AS factory
@@ -716,6 +769,9 @@ class MappingRows(Resource):
 
             _validate_references(mapping)
 
+            article = _get_budget_article(mapping['id'])
+            article_name = article.name
+
             db = _get_db()
 
             id_str = _generate_id_str(
@@ -782,6 +838,7 @@ class MappingRows(Resource):
                 insert_sql,
                 {
                     **mapping,
+                    'article_name': article_name,
                     'id_str': id_str
                 }
             )
@@ -889,12 +946,8 @@ class MappingRowsUpdate(Resource):
                 'id'
             )
 
-            article_name = data.get('article_name')
-
-            if article_name is None:
-                article_name = ''
-
-            article_name = str(article_name)
+            article = _get_budget_article(mapping_id)
+            article_name = article.name
 
             coefficient = _to_float(
                 data.get('coefficient'),
