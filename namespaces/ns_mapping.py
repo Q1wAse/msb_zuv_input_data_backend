@@ -73,13 +73,9 @@ mapping_post_model = ns_mapping.model(
 mapping_put_model = ns_mapping.model(
     'MappingRowPut',
     {
-        'id_str': fields.String(
-            required=True,
-            description='Уникальный идентификатор строки мэппинга'
-        ),
         'id': fields.Integer(
             required=True,
-            description='Неизменяемый ID бюджетной статьи'
+            description='ID бюджетной статьи'
         ),
         'article_name': fields.String(
             required=False,
@@ -91,15 +87,15 @@ mapping_put_model = ns_mapping.model(
         ),
         'coefficient': fields.Float(
             required=True,
-            description='Неизменяемый коэффициент'
+            description='Коэффициент'
         ),
         'factory_id': fields.Integer(
             required=True,
-            description='Неизменяемое предприятие'
+            description='Предприятие'
         ),
         'distribution_type_id': fields.Integer(
-            required=True,
-            description='Неизменяемый тип распределения'
+            required=False,
+            description='Тип распределения'
         ),
         'owner_id': fields.Integer(
             required=False,
@@ -110,8 +106,8 @@ mapping_put_model = ns_mapping.model(
             description='Месторождение / поле'
         ),
         'product_category_id': fields.Integer(
-            required=False,
-            description='Автоматически определяется по продукту'
+            required=True,
+            description='Категория продукта'
         ),
         'supplier_id': fields.Integer(
             required=False,
@@ -123,7 +119,7 @@ mapping_put_model = ns_mapping.model(
         ),
         'year': fields.Integer(
             required=True,
-            description='Неизменяемый год'
+            description='Год'
         )
     }
 )
@@ -275,7 +271,7 @@ def _generate_id_str(
         factory_id,
         type_raspr_id,
         year
-):
+    ):
     """
     id_str формируется по правилу: id + '_' + factory.id + '_' + type_raspr.id + '_' + year (100332254_7_7_2026)
     """
@@ -288,7 +284,7 @@ def _generate_id_str(
 def _get_dictionary(
         table_name,
         order_by='name'
-):
+    ):
     """
     Получить простой справочник со структурой:
         [
@@ -820,7 +816,6 @@ class MappingRows(Resource):
 class MappingRowsUpdate(Resource):
 
     @ns_mapping.expect(mapping_put_model, validate=True)
-
     def put(self, id_str):
         try:
             data = request.get_json(force=True, silent=False)
@@ -829,28 +824,22 @@ class MappingRowsUpdate(Resource):
                 raise ValueError(
                     'Тело запроса должно быть JSON'
                 )
-
-            json_id_str = data.get('id_str')
-
-            if not json_id_str:
-                raise ValueError(
-                    'Поле id_str обязательно'
-                )
-
-            json_id_str = str(json_id_str)
-
-            # id_str из URL и JSON должны совпадать
-            if json_id_str != str(id_str):
-                raise ValueError(
-                    'id_str в URL и id_str в JSON должны совпадать'
-                )
+            # 1. Находим существующую строку по СТАРОМУ id_str
             db = _get_db()
+
             select_sql = text("""
                 SELECT
                     id,
+                    name,
                     koef,
                     factory,
                     type_raspr,
+                    sobstv,
+                    mest,
+                    category_product_id,
+                    id_product,
+                    post_id,
+                    ei_id,
                     year,
                     id_str
                 FROM tab_map_bs_product_d816_4
@@ -861,7 +850,7 @@ class MappingRowsUpdate(Resource):
             existing = db.execute(
                 select_sql,
                 {
-                    'id_str': json_id_str
+                    'id_str': str(id_str)
                 }
             ).fetchone()
 
@@ -869,137 +858,78 @@ class MappingRowsUpdate(Resource):
                 return {
                     'code': 'validation_error',
                     'message': (
-                        f'Строка мэппинга с id_str={json_id_str} не найдена'
+                        f'Строка мэппинга с id_str={id_str} не найдена'
                     )
                 }, 404
 
-            # ----------------------------------------------------------------------------------
-            # Неизменяемые поля
-            # ----------------------------------------------------------------------------------
+            # 2. Проверяем обязательные поля
+            required_fields = [
+                'id',
+                'product_id',
+                'coefficient',
+                'factory_id',
+                'product_category_id',
+                'unit_id',
+                'year'
+            ]
 
-            if 'id' not in data:
-                raise ValueError(
-                    'Поле id обязательно'
-                )
+            for field_name in required_fields:
+                if (
+                        field_name not in data
+                        or data[field_name] is None
+                        or data[field_name] == ''
+                ):
+                    raise ValueError(
+                        f'Поле {field_name} обязательно'
+                    )
 
-            if int(data['id']) != int(existing.id):
-                raise ValueError(
-                    'Поле id является неизменяемым'
-                )
-
-            if 'factory_id' not in data:
-                raise ValueError(
-                    'Поле factory_id обязательно'
-                )
-
-            if int(data['factory_id']) != int(existing.factory):
-                raise ValueError(
-                    'Поле factory_id является неизменяемым'
-                )
-
-            if 'distribution_type_id' not in data:
-                raise ValueError(
-                    'Поле distribution_type_id обязательно'
-                )
-
-            json_type_raspr = _to_id(
-                data.get('distribution_type_id')
+            # 3. Получаем ВСЕ новые значения
+            mapping_id = _to_int(
+                data.get('id'),
+                'id'
             )
 
-            if json_type_raspr != existing.type_raspr:
-                raise ValueError(
-                    'Поле distribution_type_id является неизменяемым'
-                )
+            article_name = data.get('article_name')
 
-            if 'year' not in data:
-                raise ValueError(
-                    'Поле year обязательно'
-                )
+            if article_name is None:
+                article_name = ''
 
-            if int(data['year']) != int(existing.year):
-                raise ValueError(
-                    'Поле year является неизменяемым'
-                )
+            article_name = str(article_name)
 
-            if 'coefficient' not in data:
-                raise ValueError(
-                    'Поле coefficient обязательно'
-                )
-
-            json_coefficient = _to_float(
+            coefficient = _to_float(
                 data.get('coefficient'),
                 'coefficient'
             )
 
-            existing_coefficient = (
-                float(existing.koef)
-                if existing.koef is not None
-                else None
+            factory_id = _to_int(
+                data.get('factory_id'),
+                'factory_id'
             )
-
-            if (
-                existing_coefficient is not None
-                and json_coefficient != existing_coefficient
-            ):
-                raise ValueError(
-                    'Поле coefficient является неизменяемым'
-                )
 
             product_id = _to_int(
                 data.get('product_id'),
                 'product_id'
             )
 
-            product_sql = text("""
-                SELECT
-                    id,
-                    group_nom_real
-                FROM tab_view_product_d816_4
-                WHERE id = :id
-                LIMIT 1
-            """)
-            product = db.execute(
-                product_sql,
-                {
-                    'id': product_id
-                }
-            ).fetchone()
+            product_category_id = _to_int(
+                data.get('product_category_id'),
+                'product_category_id'
+            )
 
-            if not product:
-                raise ValueError(
-                    f'Продукт с id={product_id} не найден'
-                )
-            # product_category_id определяется автоматически из tab_view_product_d816_4.group_nom_real
-            if product.group_nom_real is None:
-                raise ValueError(
-                    f'Для продукта с id={product_id} '
-                    f'не определена группа group_nom_real'
-                )
+            unit_id = _to_int(
+                data.get('unit_id'),
+                'unit_id'
+            )
 
-            category_sql = text("""
-                SELECT
-                    id, name
-                FROM tab_category_product_d816_4
-                WHERE id = :group_nom_real
-                LIMIT 1
-            """)
+            year = _to_int(
+                data.get('year'),
+                'year'
+            )
 
-            category = db.execute(
-                category_sql,
-                {
-                    'group_nom_real': product.group_nom_real
-                }
-            ).fetchone()
+            distribution_type_id = _to_id(
+                data.get('distribution_type_id')
+            )
 
-            if not category:
-                raise ValueError(
-                    f'Категория продукта "{product.group_nom_real}" '
-                    f'не найдена в tab_category_product_d816_4'
-                )
-
-            product_category_id = category.id
-
-            # Изменяемые справочники
             owner_id = _to_id(
                 data.get('owner_id')
             )
@@ -1012,12 +942,23 @@ class MappingRowsUpdate(Resource):
                 data.get('supplier_id')
             )
 
-            unit_id = _to_int(
-                data.get('unit_id'),
-                'unit_id'
-            )
-
+            # 4. Проверяем существование справочных значений
             reference_checks = [
+                (
+                    'factory_id',
+                    'tab_factory_d816_4',
+                    factory_id
+                ),
+                (
+                    'product_id',
+                    'tab_view_product_d816_4',
+                    product_id
+                ),
+                (
+                    'product_category_id',
+                    'tab_category_product_d816_4',
+                    product_category_id
+                ),
                 (
                     'unit_id',
                     'tab_ei_d816_4',
@@ -1026,6 +967,11 @@ class MappingRowsUpdate(Resource):
             ]
 
             optional_checks = [
+                (
+                    'distribution_type_id',
+                    'tab_type_raspr_d816_4',
+                    distribution_type_id
+                ),
                 (
                     'owner_id',
                     'tab_sobstv_d816_4',
@@ -1070,72 +1016,106 @@ class MappingRowsUpdate(Resource):
                         f'Значение {value} для поля {field_name} '
                         f'не найдено в справочнике {table_name}'
                     )
+            # 5. Формируем новый id_str = id + '_' + factory.id + '_' + type_raspr.id + '_' + year
+            new_id_str = _generate_id_str(
+                mapping_id=mapping_id,
+                factory_id=factory_id,
+                type_raspr_id=distribution_type_id or 0,
+                year=year
+            )
 
-            article_name = data.get('article_name')
+            # 6. Проверяем, что новый id_str не занят другой строкой
+            duplicate_sql = text("""
+                SELECT 1
+                FROM tab_map_bs_product_d816_4
+                WHERE id_str = :id_str
+                  AND id_str <> :old_id_str
+                LIMIT 1
+            """)
 
-            if article_name is None:
-                article_name = ''
+            duplicate = db.execute(
+                duplicate_sql,
+                {
+                    'id_str': new_id_str,
+                    'old_id_str': str(id_str)
+                }
+            ).fetchone()
 
-            # ----------------------------------------------------------------------------------
-            # UPDATE
-            #
-            # Изменяются ТОЛЬКО:
-            # name
-            # id_product
-            # sobstv
-            # mest
-            # post_id
-            # ei_id
-            # category_product_id
-            #
-            # НЕ изменяются:
-            # id
-            # koef
-            # factory
-            # type_raspr
-            # year
-            # id_str
-            # ----------------------------------------------------------------------------------
+            if duplicate:
+                raise ValueError(
+                    f'Мэппинг с id_str={new_id_str} уже существует'
+                )
+
+            # 7. UPDATE #id_str рассчитывается автоматически.
             update_sql = text("""
                 UPDATE tab_map_bs_product_d816_4
                 SET
+                    id = :id,
                     name = :article_name,
-                    id_product = :id_product,
+                    koef = :koef,
+                    factory = :factory,
+                    type_raspr = :type_raspr,
                     sobstv = :sobstv,
                     mest = :mest,
+                    category_product_id = :category_product_id,
+                    id_product = :id_product,
                     post_id = :post_id,
                     ei_id = :ei_id,
-                    category_product_id = :category_product_id
-                WHERE id_str = :id_str
+                    year = :year,
+                    id_str = :new_id_str
+                WHERE id_str = :old_id_str
             """)
 
             result = db.execute(
                 update_sql,
                 {
+                    'id': mapping_id,
                     'article_name': article_name,
-                    'id_product': product_id,
+                    'koef': coefficient,
+                    'factory': factory_id,
+                    'type_raspr': distribution_type_id,
                     'sobstv': owner_id,
                     'mest': field_id,
+                    'category_product_id': product_category_id,
+                    'id_product': product_id,
                     'post_id': supplier_id,
                     'ei_id': unit_id,
-                    'category_product_id': product_category_id,
-                    'id_str': json_id_str
+                    'year': year,
+                    'new_id_str': new_id_str,
+                    'old_id_str': str(id_str)
                 }
             )
 
+            if result.rowcount == 0:
+                raise ValueError(
+                    'Строка мэппинга не была изменена'
+                )
+
             db.commit()
 
-            # ----------------------------------------------------------------------------------
-            # Возвращаем обновлённую строку
-            # ----------------------------------------------------------------------------------
             return {
-                'id': existing.id,
-                'id_str': existing.id_str,
+                'message': 'Строка мэппинга обновлена',
+                'id': mapping_id,
+                'id_str': new_id_str,
+                'article_name': article_name,
                 'product_id': product_id,
-                'product_category_id': product_category_id
+                'coefficient': coefficient,
+                'factory_id': factory_id,
+                'distribution_type_id': distribution_type_id,
+                'owner_id': owner_id,
+                'field_id': field_id,
+                'product_category_id': product_category_id,
+                'supplier_id': supplier_id,
+                'unit_id': unit_id,
+                'year': year
             }, 200
 
         except ValueError as e:
+            try:
+                db.rollback()
+            except Exception:
+                pass
+
             return {
                 'code': 'validation_error',
                 'message': str(e)
