@@ -1705,7 +1705,7 @@ def get_exist_factory_collect(factory_id):
     fields_src_list_frame1 = [
         {
             'name': 'product',
-            'default': 31,  # фиксированный продукт для frame1
+            'default': 67,  # фиксированный продукт для frame1
         },
         {
             'name': 'sobstv',
@@ -1733,7 +1733,7 @@ def get_exist_factory_collect(factory_id):
         },
         {
             'name': 'product',
-            'default': 56,
+            'default': 7,
         },
         {
             'name': 'sobstv',
@@ -1974,13 +1974,13 @@ def get_calculated_dataset(selected_variant_compare,
 
     # Если product не передан в фильтрах, используем значение по умолчанию
     if not products_frame1:
-        products_frame1 = [67]  # или другой продукт по умолчанию
+        products_frame1 = [67]
 
     if v_filters_middle_volume_frame1 or v_filters_middle_volume_frame2:
         collection = {
             'panel_middle_month_volume_frame1': get_calc_volume(
                 'month',
-                products_frame1,  # используем продукты из фильтра
+                products_frame1,  # продукты из фильтра frame1
                 [5],  # Переработка
                 v_filters_middle_volume_frame1,
                 selected_variant_compare,
@@ -1999,12 +1999,12 @@ def get_calculated_dataset(selected_variant_compare,
                 get_calc_volume(
                     'month',
                     [],  #
-                    [7],  # Переработка
+                    [7],  # Производство
                     v_filters_middle_volume_frame2 or {},
                     selected_variant_compare,
                     selected_factories,
                     variant_columns,
-                    ei=1, ),  # тыс тонн (Единица измерения)
+                    ei=1, ),  # тыс тонн
                 get_calc_volume(
                     'month',
                     [],
@@ -2013,7 +2013,7 @@ def get_calculated_dataset(selected_variant_compare,
                     selected_variant_compare,
                     selected_factories,
                     variant_columns,
-                    ei=1,  # тыс тонн (Единица измерения)
+                    ei=1,  # тыс тонн
                 ),
                 filters=v_filters_middle_volume_frame2 or {},
                 selected_factories=selected_factories,
@@ -2076,7 +2076,7 @@ def get_calculated_dataset(selected_variant_compare,
                 selected_variant_compare,
                 selected_factories,
                 variant_columns,
-                ei=1, ),  # тыс тонн (Единица измерения)
+                ei=1, ),  # тыс тонн
             # Центральный правый график
             'panel_middle_month_volume_frame2': get_calc_volume(
                 'month',
@@ -2086,7 +2086,7 @@ def get_calculated_dataset(selected_variant_compare,
                 selected_variant_compare,
                 selected_factories,
                 variant_columns,
-                ei=1, ),  # тыс тонн (Единица измерения)
+                ei=1, ),  # тыс тонн
             # Левая таблица
             'panel_lower_month_volume_tab1': {
                 'ton':

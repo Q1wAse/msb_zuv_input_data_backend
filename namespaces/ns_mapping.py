@@ -702,6 +702,9 @@ class MappingRows(Resource):
                 items.append({
                     'id': row.id,
 
+                    # id_str возвращается так же, как в PUT
+                    'id_str': row.id_str,
+
                     'article_name': row.article_name,
 
                     'product': {
