@@ -1700,45 +1700,114 @@ def get_def_val_from_list(def_numb,fields_src_list,src,value_list):
 def get_exist_factory_collect(factory_id):
     db = uf.get_db_connection()
     res = {}
-    fields_src_list =[
-        {
-            'name': 'cat_product',
-            'default1': 7,
-            'default2': 9,
-        },
+
+    # Для frame1 - без категории продукта
+    fields_src_list_frame1 = [
         {
             'name': 'product',
-            'default1' : 31,
-            'default2' : 56,
+            'default': 31,  # фиксированный продукт для frame1
         },
         {
             'name': 'sobstv',
-            'default1' : None,
-            'default2' : None,
+            'default': None,
         },
         {
             'name': 'mest',
-            'default1' : None,
-            'default2' : None,
+            'default': None,
         },
         {
             'name': 'post_zuv',
-            'default1' : None,
-            'default2' : None,
+            'default': None,
         },
         {
             'name': 'ei',
-            'default1' : 1,
-            'default2' : 1,
+            'default': 1,
         },
     ]
-    fields_list = [
-        item
-        for field in fields_src_list
-        for item in (f"{field.get('name','')}_id", f"{field.get('name','')}_name")
+
+    # Для frame2 - с категорией продукта
+    fields_src_list_frame2 = [
+        {
+            'name': 'cat_product',
+            'default': 9,
+        },
+        {
+            'name': 'product',
+            'default': 56,
+        },
+        {
+            'name': 'sobstv',
+            'default': None,
+        },
+        {
+            'name': 'mest',
+            'default': None,
+        },
+        {
+            'name': 'post_zuv',
+            'default': None,
+        },
+        {
+            'name': 'ei',
+            'default': 1,
+        },
     ]
-    fields_list.insert(0,'type_raspr')
-    fields_str = """
+
+    # Формируем поля для SQL (frame1 - только продукты, без категории)
+    fields_list_frame1 = [
+        item
+        for field in fields_src_list_frame1
+        for item in (f"{field.get('name', '')}_id", f"{field.get('name', '')}_name")
+    ]
+    fields_list_frame1.insert(0, 'type_raspr')
+
+    # Формируем поля для SQL (frame2 - с категорией)
+    fields_list_frame2 = [
+        item
+        for field in fields_src_list_frame2
+        for item in (f"{field.get('name', '')}_id", f"{field.get('name', '')}_name")
+    ]
+    fields_list_frame2.insert(0, 'type_raspr')
+
+    # SQL для frame1 (без категории)
+    fields_str_frame1 = """
+        pererab.tab_type_raspr_d816_4_ids as {},
+        product.id as {},
+        product.name as {},
+        sobstv.id as {},
+        sobstv.name as {},
+        mest.id as {},
+        mest.name as {},
+        post_zuv.id as {},
+        post_zuv.name as {},
+        ei.id as {},
+        ei.name as {}
+    """
+    fields_clr_str_frame1 = fields_str_frame1.replace(' as {}', '')
+    fields_str_frame1 = fields_str_frame1.format(*fields_list_frame1)
+
+    sql_text_frame1 = text(f"""
+        SELECT
+            {fields_str_frame1}
+        FROM
+            tab_pererabotka_d816_4 as pererab
+        LEFT JOIN tab_factory_d816_4 as factory ON pererab.tab_factory_d816_4_ids = factory.id
+        LEFT JOIN tab_view_product_d816_4 as product ON pererab.tab_product_d816_4_ids = product.id
+        LEFT JOIN tab_sobstv_d816_4 as sobstv ON pererab.tab_sobstv_d816_4_ids = sobstv.id
+        LEFT JOIN tab_mest_d816_4 as mest ON pererab.tab_mest_d816_4_ids = mest.id
+        LEFT JOIN tab_post_zuv_d816_4 as post_zuv ON pererab.tab_post_zuv_d816_4_ids = post_zuv.id
+        LEFT JOIN tab_ei_d816_4 as ei ON pererab.tab_ei_d816_4_ids = ei.id
+        WHERE
+            pererab.tab_type_raspr_d816_4_ids IN (5) AND
+            pererab.tab_factory_d816_4_ids = {int(factory_id)}
+        GROUP BY
+            {fields_clr_str_frame1}
+        ORDER BY 
+            {fields_clr_str_frame1}
+    """)
+
+    # SQL для frame2 (с категорией)
+    fields_str_frame2 = """
         pererab.tab_type_raspr_d816_4_ids as {},
         category.id as {},
         category.name as {},
@@ -1753,12 +1822,12 @@ def get_exist_factory_collect(factory_id):
         ei.id as {},
         ei.name as {}
     """
-    fields_clr_str = fields_str.replace(' as {}','')
-    fields_str = fields_str.format(*fields_list)
+    fields_clr_str_frame2 = fields_str_frame2.replace(' as {}', '')
+    fields_str_frame2 = fields_str_frame2.format(*fields_list_frame2)
 
-    sql_text = text(f"""
+    sql_text_frame2 = text(f"""
         SELECT
-            {fields_str}
+            {fields_str_frame2}
         FROM
             tab_pererabotka_d816_4 as pererab
         LEFT JOIN tab_factory_d816_4 as factory ON pererab.tab_factory_d816_4_ids = factory.id
@@ -1769,54 +1838,45 @@ def get_exist_factory_collect(factory_id):
         LEFT JOIN tab_post_zuv_d816_4 as post_zuv ON pererab.tab_post_zuv_d816_4_ids = post_zuv.id
         LEFT JOIN tab_ei_d816_4 as ei ON pererab.tab_ei_d816_4_ids = ei.id
         WHERE
-            pererab.tab_type_raspr_d816_4_ids IN (5,7) AND
+            pererab.tab_type_raspr_d816_4_ids IN (7) AND
             pererab.tab_factory_d816_4_ids = {int(factory_id)}
         GROUP BY
-            {fields_clr_str}
+            {fields_clr_str_frame2}
         ORDER BY 
-            {fields_clr_str}
+            {fields_clr_str_frame2}
     """)
 
-    # sql_text = text(f"""
-    #     SELECT
-    #         {fields_str}
-    #     FROM
-    #         tab_pererabotka_d816_4 as pererab
-    #     JOIN
-    #         tab_factory_d816_4 as factory
-    #     ON
-    #         pererab.tab_factory_d816_4_ids =
-    #         factory.id
-    #     WHERE
-    #         pererab.tab_type_raspr_d816_4_ids IN (5,7) AND
-    #         pererab.tab_factory_d816_4_ids = {int(factory_id)}
-    #     GROUP BY
-    #         {fields_clr_str}
-    #     ORDER BY
-    #         {fields_clr_str}
-    # """)
-    result = db.execute(sql_text).fetchall()
-    if result:
-        uniq_dict_frame1 = defaultdict(lambda: defaultdict(int)) # defaultdict(list)
-        uniq_dict_frame2 = defaultdict(lambda: defaultdict(int)) # defaultdict(list)
-        for value in fields_src_list:
-            src = value.get('name','')
-            if src:
-                uniq_dict_frame1[src]['default'] = None
-                uniq_dict_frame1[src]['value'] = []
-                uniq_dict_frame2[src]['default'] = None
-                uniq_dict_frame2[src]['value'] = []
-        for row in result:
+    # Выполняем запросы
+    result_frame1 = db.execute(sql_text_frame1).fetchall()
+    result_frame2 = db.execute(sql_text_frame2).fetchall()
+
+    # Инициализация словарей для frame1
+    uniq_dict_frame1 = defaultdict(lambda: defaultdict(int))
+    for value in fields_src_list_frame1:
+        src = value.get('name', '')
+        if src:
+            uniq_dict_frame1[src]['default'] = None
+            uniq_dict_frame1[src]['value'] = []
+
+    # Инициализация словарей для frame2
+    uniq_dict_frame2 = defaultdict(lambda: defaultdict(int))
+    for value in fields_src_list_frame2:
+        src = value.get('name', '')
+        if src:
+            uniq_dict_frame2[src]['default'] = None
+            uniq_dict_frame2[src]['value'] = []
+
+    # Обработка результатов для frame1 (только переработка, тип_распр = 5)
+    if result_frame1:
+        for row in result_frame1:
             mapping = row._mapping
-            type_raspr = mapping.get('type_raspr', None)
             row_data = defaultdict(dict)
             for db_key, db_value in mapping.items():
                 if db_key != 'type_raspr':
-                    for value in fields_src_list:
-                        src = value.get('name','')
+                    for value in fields_src_list_frame1:
+                        src = value.get('name', '')
                         if src in db_key:
                             suffix = db_key.rsplit('_', 1)[-1]
-
                             if suffix == 'id':
                                 row_data[src]['id'] = db_value
                             elif suffix == 'name':
@@ -1825,33 +1885,51 @@ def get_exist_factory_collect(factory_id):
 
             for src, item_dict in row_data.items():
                 if 'id' in item_dict and 'name' in item_dict and item_dict.get('id', 0) != 0:
-                    if type_raspr == 5: # Переработка
-                        if item_dict not in uniq_dict_frame1[src]['value']:
-                            uniq_dict_frame1[src]['value'].append(item_dict)
-                    elif type_raspr == 7: # Производство
-                        if item_dict not in uniq_dict_frame2[src]['value']:
-                            uniq_dict_frame2[src]['value'].append(item_dict)
-        for value in fields_src_list:
+                    if item_dict not in uniq_dict_frame1[src]['value']:
+                        uniq_dict_frame1[src]['value'].append(item_dict)
+
+        # Установка значений по умолчанию для frame1
+        for value in fields_src_list_frame1:
             src = value.get('name', '')
             if src:
-                uniq_dict_frame1[src]['value'].sort(key=lambda row: row.get('name',''))
-                uniq_dict_frame1[src]['default'] = get_def_val_from_list(
-                    'default1',
-                    fields_src_list,
-                    src,
-                    uniq_dict_frame1[src]['value']
-                )
-                uniq_dict_frame2[src]['value'].sort(key=lambda row: row.get('name',''))
-                uniq_dict_frame2[src]['default'] = get_def_val_from_list(
-                    'default2',
-                    fields_src_list,
-                    src,
-                    uniq_dict_frame2[src]['value']
-                )
-        res = {
-             'panel_middle_month_volume_frame1_filter' : uniq_dict_frame1,
-             'panel_middle_month_volume_frame2_filter' : uniq_dict_frame2
-        }
+                uniq_dict_frame1[src]['value'].sort(key=lambda row: row.get('name', ''))
+                uniq_dict_frame1[src]['default'] = value.get('default')
+
+    # Обработка результатов для frame2 (только производство, тип_распр = 7)
+    if result_frame2:
+        for row in result_frame2:
+            mapping = row._mapping
+            row_data = defaultdict(dict)
+            for db_key, db_value in mapping.items():
+                if db_key != 'type_raspr':
+                    for value in fields_src_list_frame2:
+                        src = value.get('name', '')
+                        if src in db_key:
+                            suffix = db_key.rsplit('_', 1)[-1]
+                            if suffix == 'id':
+                                row_data[src]['id'] = db_value
+                            elif suffix == 'name':
+                                row_data[src]['name'] = db_value
+                            break
+
+            for src, item_dict in row_data.items():
+                if 'id' in item_dict and 'name' in item_dict and item_dict.get('id', 0) != 0:
+                    if item_dict not in uniq_dict_frame2[src]['value']:
+                        uniq_dict_frame2[src]['value'].append(item_dict)
+
+        # Установка значений по умолчанию для frame2
+        for value in fields_src_list_frame2:
+            src = value.get('name', '')
+            if src:
+                uniq_dict_frame2[src]['value'].sort(key=lambda row: row.get('name', ''))
+                uniq_dict_frame2[src]['default'] = value.get('default')
+
+    # Формируем результат
+    res = {
+        'panel_middle_month_volume_frame1_filter': uniq_dict_frame1,
+        'panel_middle_month_volume_frame2_filter': uniq_dict_frame2
+    }
+
     return res
 #=======================================================================================================================
 def get_calculated_dataset(selected_variant_compare,
@@ -1889,11 +1967,20 @@ def get_calculated_dataset(selected_variant_compare,
         'value': cat_product
     }
 
+    # Извлекаем product из фильтров frame1
+    products_frame1 = []
+    if v_filters_middle_volume_frame1:
+        products_frame1 = v_filters_middle_volume_frame1.get('product', [])
+
+    # Если product не передан в фильтрах, используем значение по умолчанию
+    if not products_frame1:
+        products_frame1 = [67]  # или другой продукт по умолчанию
+
     if v_filters_middle_volume_frame1 or v_filters_middle_volume_frame2:
         collection = {
             'panel_middle_month_volume_frame1': get_calc_volume(
                 'month',
-                [],  # Газ
+                products_frame1,  # используем продукты из фильтра
                 [5],  # Переработка
                 v_filters_middle_volume_frame1,
                 selected_variant_compare,
@@ -1934,9 +2021,17 @@ def get_calculated_dataset(selected_variant_compare,
                 ei=1),
         }
     else:
-        collection  = {
+        # Извлекаем product из фильтров frame1 для случая без фильтров
+        products_frame1_default = []
+        if v_filters_middle_volume_frame1:
+            products_frame1_default = v_filters_middle_volume_frame1.get('product', [])
+
+        if not products_frame1_default:
+            products_frame1_default = [67]  # продукт по умолчанию
+
+        collection = {
             # Верхняя левая панель, где 4 карточки
-            'panel_upper_year_volume_frame1' : get_calc_volume(
+            'panel_upper_year_volume_frame1': get_calc_volume(
                 'year',
                 [64],  # Газ
                 [5],  # Переработка
@@ -1953,7 +2048,7 @@ def get_calculated_dataset(selected_variant_compare,
                 selected_variant_compare,
                 selected_factories,
                 variant_columns,
-                ei = 1, ),  # тыс тонн (Единица измерения)
+                ei=1, ),  # тыс тонн (Единица измерения)
             'panel_upper_year_volume_frame3': get_calc_volume(
                 'year',
                 [],  # пусто
@@ -1972,12 +2067,12 @@ def get_calculated_dataset(selected_variant_compare,
                 selected_factories,
                 variant_columns,
                 ei=1, ),  # тыс тонн (Единица измерения)
-            # Центральный левый график
+            # Центральный левый график - используем продукты из фильтра
             'panel_middle_month_volume_frame1': get_calc_volume(
                 'month',
-                [],  #
+                products_frame1_default,  # продукты из фильтра frame1
                 [5],  # Переработка
-                {},
+                v_filters_middle_volume_frame1 or {},  # передаём фильтры frame1
                 selected_variant_compare,
                 selected_factories,
                 variant_columns,
@@ -1987,19 +2082,19 @@ def get_calculated_dataset(selected_variant_compare,
                 'month',
                 [],  # Газ
                 [7],  # Производство
-                {},
+                v_filters_middle_volume_frame2 or {},
                 selected_variant_compare,
                 selected_factories,
                 variant_columns,
                 ei=1, ),  # тыс тонн (Единица измерения)
             # Левая таблица
             'panel_lower_month_volume_tab1': {
-                'ton' :
+                'ton':
                     convert_data_to_tab_front(get_calc_volume(
                         'tab_product_d816_4_ids',
                         [],  # Газ
                         [7],  # Производство
-                        {},
+                        v_filters_middle_volume_frame2 or {},
                         selected_variant_compare,
                         selected_factories,
                         variant_columns,
@@ -2009,7 +2104,7 @@ def get_calculated_dataset(selected_variant_compare,
                         'tab_product_d816_4_ids',
                         [],  # Газ
                         [7],  # Производство
-                        {},
+                        v_filters_middle_volume_frame2 or {},
                         selected_variant_compare,
                         selected_factories,
                         variant_columns,
@@ -2017,11 +2112,11 @@ def get_calculated_dataset(selected_variant_compare,
             },
             # Правая таблица
             'panel_lower_month_volume_tab2': {
-                'ton' : convert_data_to_tab_front(get_calc_volume(
+                'ton': convert_data_to_tab_front(get_calc_volume(
                     'tab_product_d816_4_ids',
                     [],  # Газ
                     [5],  # Переработка
-                    {},
+                    v_filters_middle_volume_frame2 or {},
                     selected_variant_compare,
                     selected_factories,
                     variant_columns,
@@ -2030,7 +2125,7 @@ def get_calculated_dataset(selected_variant_compare,
                     'tab_product_d816_4_ids',
                     [],  # Газ
                     [5],  # Переработка
-                    {},
+                    v_filters_middle_volume_frame2 or {},
                     selected_variant_compare,
                     selected_factories,
                     variant_columns,
@@ -2042,7 +2137,8 @@ def get_calculated_dataset(selected_variant_compare,
                 get_exist_factory_collect(selected_factories[0])
             )
 
-            collection['panel_middle_month_volume_frame1_filter']['cat_product'] = cat_product_frame1
+            # Для frame1 не добавляем cat_product, оставляем только product
+            # collection['panel_middle_month_volume_frame1_filter']['cat_product'] = cat_product_frame1
             collection['panel_middle_month_volume_frame2_filter']['cat_product'] = cat_product_frame2
 
     return collection

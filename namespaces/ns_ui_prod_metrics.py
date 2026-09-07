@@ -80,16 +80,12 @@ class ClsStructDataProdMetrics(Resource):
                 'versions': list(grouped.values()),
                 'years' : uf.get_pagin_data('view_year', '', 1, 100),
                 'cat_product': cat_product,
-                # Значения по умолчанию для фильтра 1
+
+                # Значения по умолчанию для фильтра 1 (без категории, только один продукт)
                 'filter_middle_volume_frame1': {
-                    'cat_product': default_category_frame1,
-                    'product': (
-                        funcs_prod_metrics.get_products_by_category(
-                            default_category_frame1['id']
-                        )
-                        if default_category_frame1 else []
-                    )
+                    'product': [67]
                 },
+                # Значения по умолчанию для фильтра 2 (оставляем как есть)
                 # Значения по умолчанию для фильтра 2
                 'filter_middle_volume_frame2': {
                     'cat_product': default_category_frame2,
@@ -119,7 +115,15 @@ variant_column_model = ns_ui_prod_metrics.model('VariantColumn', {
     )
 })
 #==============================================================================================================================
-flt_middle_volume_model = ns_ui_prod_metrics.model('FltMiddleVolume', {
+flt_middle_volume_model1 = ns_ui_prod_metrics.model('FltMiddleVolume', {
+    'product': fields.List(fields.Integer,description='Продукт', required=False),
+    'sobstv': fields.List(fields.Integer,description='Собственник', required=False),
+    'mest': fields.List(fields.Integer,description='Месторождение', required=False),
+    'post_zuv': fields.List(fields.Integer, description='Поставщик ЖУВ', required=False),
+    'ei': fields.List(fields.Integer, description='Единицы измерения', required=False),
+})
+
+flt_middle_volume_model2 = ns_ui_prod_metrics.model('FltMiddleVolume', {
     'product': fields.List(fields.Integer,description='Продукт', required=False),
     'sobstv': fields.List(fields.Integer,description='Собственник', required=False),
     'mest': fields.List(fields.Integer,description='Месторождение', required=False),
@@ -142,20 +146,19 @@ flt_container_get_prod_metrics_model = ns_ui_prod_metrics.model('ContainerGetPro
         example=["7"]
     ),
     'filtertMiddleVolumeFrame1': fields.Nested(
-        flt_middle_volume_model,
+        flt_middle_volume_model1,
         description='Фильтр для центрального левого графика',
         required=True,
         example={
-            'product': [31],
+            'product': [67],
             'sobstv': [1],
-            'mest': [32],
-            'post_zuv': [10],
+            'mest': [35],
+            'post_zuv': [8],
             'ei': [1],
-            'cat_product': [7],
         }
     ),
     'filtertMiddleVolumeFrame2': fields.Nested(
-        flt_middle_volume_model,
+        flt_middle_volume_model2,
         description='Фильтр для правых графиков',
         required=True,
         example={
@@ -209,7 +212,7 @@ main_container_get_prod_metrics_model = ns_ui_prod_metrics.model('ContainerGetPr
         # example=["1", "2", "3"]
     ),
     'filtertMiddleVolumeFrame2': fields.Nested(
-        flt_middle_volume_model,
+        flt_middle_volume_model2,
         description='Фильтр для правых графиков',
         required=True,
         example={
