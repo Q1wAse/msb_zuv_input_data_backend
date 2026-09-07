@@ -380,7 +380,7 @@ def _get_formula_rows(
             {' AND '.join(where_parts)}
         ORDER BY
             CASE
-                WHEN product_id IS NOT NULL THEN 0
+                WHEN product_id IS NOT NULL AND product_id <> 0 THEN 0
                 ELSE 1
             END,
             id
@@ -475,15 +475,17 @@ def _get_formula_for_selection(
         ei_id=None
 ):
     """
-    Правила:
-    1. Категория + все продукты:
-       - если для завода и категории есть ровно одна формула продукта,
-         использовать эту формулу для всей категории;
-       - иначе использовать формулу категории (product_id IS NULL).
-    2. Категория + один продукт:
-       - если для продукта существует одна бюджетная статья,
-         используется формула продукта;
-       - если статей несколько — формула категории.
+    Выбор формулы согласно правилам.
+
+    1. Выбрана категория + product_id отсутствует:
+       -> всегда используется формула категории,
+          где product_id IS NULL или product_id = 0.
+
+    2. Выбрана категория + один конкретный продукт:
+       -> если для продукта существует одна бюджетная статья,
+          используется формула продукта;
+       -> если бюджетных статей несколько,
+          используется формула категории.
     """
 
     formula_rows = _get_formula_rows(
@@ -496,39 +498,102 @@ def _get_formula_for_selection(
     if not formula_rows:
         return None
 
-    # --------------------------------------------------------------------------------
-    # Выбрана категория, но конкретный продукт НЕ выбран.
+    # ======================================================================
+    # 1. ВЫБРАНА ТОЛЬКО КАТЕГОРИЯ
+    # ======================================================================
+    # product_id = None означает:
+    # "все продукты выбранной категории".
     #
-    # Если для этой категории существует ровно одна строка формулы
-    # с product_id != NULL — используем эту формулу для всей группы.
-    # --------------------------------------------------------------------------------
+    # В этом случае НЕ анализируем формулы конкретных продуктов.
+    # Всегда ищем формулу самой категории:
+    #
+    #     product_id IS NULL
+    #     ИЛИ
+    #     product_id = 0
+    # ======================================================================
+
     if product_id is None:
 
-        product_formula_rows = [
+        if category_product_id is None:
+            return None
+
+        category_id = int(category_product_id)
+
+        category_formula_rows = [
             row
             for row in formula_rows
             if (
-                row.product_id is not None
-                and category_product_id is not None
-                and row.category_product_id == int(category_product_id)
+                (row.product_id is None or int(row.product_id) == 0)
+                and row.category_product_id is not None
+                and int(row.category_product_id) == category_id
             )
         ]
 
-        # Для категории есть ровно одна формула продукта.
-        # Она считается общей формулой для всей группы.
-        if len(product_formula_rows) == 1:
-            return product_formula_rows[0]
+        # Должна быть одна формула категории.
+        if len(category_formula_rows) == 1:
+            return category_formula_rows[0]
 
-        # Иначе используем обычную формулу категории.
+        # Если по каким-то причинам найдено несколько,
+        # берем первую по id.
+        if category_formula_rows:
+            return min(
+                category_formula_rows,
+                key=lambda row: int(row.id)
+            )
+
+        return None
+
+    # ======================================================================
+    # 2. ВЫБРАН КОНКРЕТНЫЙ ПРОДУКТ
+    # ======================================================================
+
+    mapping_rows = _get_mapping_budget_articles(
+        factory_id=factory_id,
+        category_product_id=category_product_id,
+        product_id=product_id,
+        ei_id=ei_id
+    )
+
+    # Оставляем только соответствия выбранному продукту.
+    product_mapping_rows = [
+        row
+        for row in mapping_rows
+        if (
+            row.id_product is not None
+            and int(row.id_product) == int(product_id)
+        )
+    ]
+
+    # ----------------------------------------------------------------------
+    # Для продукта существует ровно одна бюджетная статья.
+    # Используем формулу конкретного продукта.
+    # ----------------------------------------------------------------------
+    if len(product_mapping_rows) == 1:
+
         for row in formula_rows:
             if (
-                row.product_id is None
-                and category_product_id is not None
-                and row.category_product_id == int(category_product_id)
+                row.product_id is not None
+                and int(row.product_id) == int(product_id)
             ):
                 return row
 
-        return None
+    # ----------------------------------------------------------------------
+    # Для продукта несколько бюджетных статей.
+    # Используем формулу категории.
+    # ----------------------------------------------------------------------
+    if category_product_id is not None:
+
+        category_id = int(category_product_id)
+
+        for row in formula_rows:
+            if (
+                (row.product_id is None or int(row.product_id) == 0)
+                and row.category_product_id is not None
+                and int(row.category_product_id) == category_id
+            ):
+                return row
+
+    return None
 
     # --------------------------------------------------------------------------------
     # Выбран конкретный продукт -> определить количество бюджетных статей.
@@ -921,7 +986,7 @@ def _calculate_budget_article_coefficient(
                 ELSE 1
             END,
             CASE
-                WHEN product_id IS NOT NULL THEN 0
+                WHEN product_id IS NOT NULL AND product_id <> 0 THEN 0
                 ELSE 1
             END,
             id
@@ -1265,7 +1330,6 @@ def get_list_percent_from_lists(
                         percent_formula_v1,
                         1
                     )
-
             # -----------------------------
             # Вариант 2
             # -----------------------------
@@ -1499,18 +1563,6 @@ def get_calc_volume(
     type_raspr_list = [int(item) for item in type_raspr]
     factory_list = [int(item) for item in selected_factories]
 
-    # var_plans_list = []
-    # for item in selected_variant_compare:
-    #     idx = int(item) - 1
-    #     if 0 <= idx < len(variant_columns):
-    #         var_plans_list.append(variant_columns[idx].get("variantPlaning", 0))
-
-    # years_list = []
-    # for item in selected_variant_compare:
-    #     idx = int(item) - 1
-    #     if 0 <= idx < len(variant_columns):
-    #         years_list.append(variant_columns[idx].get("year", 0))
-
     var_plans_list = [
         int(item.get("variantPlaning", 0))
         for idx, item in enumerate(variant_columns, start=1)
@@ -1529,28 +1581,6 @@ def get_calc_volume(
     query_params['factory'] = factory_list
     query_params['var_plans'] = var_plans_list
     query_params['years'] = years_list
-
-    # Запрос с распределением в столбец
-    # col_sql = text(f"""
-    #     SELECT
-    #         params.idx as variantColumns,
-    #         {data_slice_str}
-    #         sum(main.value)
-    #
-    #     FROM tab_pererabotka_d816_4 main
-    #     JOIN LATERAL unnest(CAST(:var_plans AS INTEGER[]), CAST(:years AS INTEGER[])) WITH ORDINALITY AS params(var_plan, year, idx)
-    #       ON main.tab_var_plan_d816_4_ids = params.var_plan
-    #       AND main.year = params.year
-    #     WHERE
-    #         {filter_str}
-    #         {product_str}
-    #         main.tab_type_raspr_d816_4_ids = ANY(:type_raspr) AND
-    #         {period_str}
-    #         main.tab_factory_d816_4_ids = ANY(:factory) AND
-    #         main.tab_ei_d816_4_ids = :ei
-    #     GROUP BY {data_slice_str}params.idx
-    #     ORDER BY params.idx
-    # """)
 
     # Запрос с распределением в строку
     col_sql = text(f"""
