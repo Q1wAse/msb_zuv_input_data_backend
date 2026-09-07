@@ -409,7 +409,6 @@ class MappingStructure(Resource):
             # Справочники
             # ----------------------------------------------------------------------------------
             products = _get_products()
-            budget_articles = _get_dictionary('tab_bud_st_d816_4')
             factories = _get_dictionary('tab_factory_d816_4')
             distribution_types = _get_dictionary('tab_type_raspr_d816_4')
             owners = _get_dictionary('tab_sobstv_d816_4')
@@ -450,7 +449,6 @@ class MappingStructure(Resource):
                 ),
                 'references': {
                     'products': products,
-                    'budget_articles': budget_articles,
                     'coefficients': _get_coefficients(),
                     'factories': factories,
                     'distribution_types': distribution_types,
