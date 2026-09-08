@@ -331,18 +331,25 @@ def _get_coefficients():
     ]
 def _get_products():
     db = _get_db()
+
     sql = text("""
         SELECT
             id,
-            name
+            name,
+            group_nom_real,
+            edittable
         FROM tab_view_product_d816_4
         ORDER BY name
     """)
+
     rows = db.execute(sql).fetchall()
+
     return [
         {
             'id': row.id,
-            'label': row.name
+            'label': row.name,
+            'category_id': row.group_nom_real,
+            'edittable': row.edittable
         }
         for row in rows
     ]
