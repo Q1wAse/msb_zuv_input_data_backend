@@ -81,6 +81,28 @@ class ClsStructDataProdMetrics(Resource):
                 'years' : uf.get_pagin_data('view_year', '', 1, 100),
                 'cat_product': cat_product,
 
+                # Значения вариантов по умолчанию
+                'default_variants': [
+                    {
+                        'type_data_id': 2,
+                        'year': 2026,
+                        'version_id': None,
+                        'variant_id': None
+                    },
+                    {
+                        'type_data_id': 1,
+                        'year': 2026,
+                        'version_id': 22600,
+                        'variant_id': 2260010
+                    },
+                    {
+                        'type_data_id': 1,
+                        'year': 2026,
+                        'version_id': 22600,
+                        'variant_id': 2260099
+                    }
+                ],
+
                 # Значения по умолчанию для фильтра 1 (без категории, только один продукт)
                 'filter_middle_volume_frame1': {
                     'product': [67]
