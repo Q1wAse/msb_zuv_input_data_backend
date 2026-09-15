@@ -301,7 +301,9 @@ def convert_data_to_tab_front_old(result, key_name, reverse_diff=True):
 # РАСЧЁТ КОЭФФИЦИЕНТА ВЫХОДА по формуле, которая хранится в tab_formula_koef_d816_4
 # =======================================================================================================================
 BS_COLUMN = "tab_bud_st_d816_4_ids" # id статей
-#=============== Преобразование value во float ============================
+#=============================================================================================
+# Преобразование value во float
+#=============================================================================================
 def _safe_float(value, default=0.0):
     if value is None:
         return default
@@ -309,7 +311,9 @@ def _safe_float(value, default=0.0):
         return float(value)
     except (TypeError, ValueError):
         return default
-#=============== Формулы из tab_formula_koef_d816_4 =======================
+#=============================================================================================
+#  Формулы из tab_formula_koef_d816_4
+#=============================================================================================
 def _get_formula_rows(
         factory_id,
         category_product_id=None,
@@ -317,55 +321,100 @@ def _get_formula_rows(
         ei_id=None
 ):
     """
-    Приоритет:
-        1. Формула конкретного продукта.
-        2. Формула категории продукта.
-    Фильтр по заводу и единице измерения.
+    Получить формулы для выбранного завода / категории / продукта.
+
+    Правила:
+        - product_id задан:
+            получаем формулу конкретного продукта
+            И формулу всей категории.
+
+        - product_id не задан:
+            получаем только формулу всей категории.
+
+    Формула категории:
+        product_id IS NULL
+        ИЛИ
+        product_id = 0
     """
+
     db = uf.get_db_connection()
+
     if not db:
         return []
+
     where_parts = [
         "factory_id = :factory_id"
     ]
+
     params = {
         "factory_id": int(factory_id)
     }
+
+    # Единица измерения:
+    # сначала точное совпадение ei,
+    # также допускается формула с ei IS NULL.
     if ei_id is not None:
-        where_parts.append("(ei = :ei_id OR ei IS NULL)")
+        where_parts.append(
+            "(ei = :ei_id OR ei IS NULL)"
+        )
         params["ei_id"] = int(ei_id)
 
-    product_condition = ""
+    # ------------------------------------------------------------------
+    # Выбран конкретный продукт
+    # ------------------------------------------------------------------
     if product_id is not None:
-        product_condition = """
-            (
+
+        if category_product_id is None:
+            # Нет категории -> ищем только формулу продукта
+            where_parts.append(
+                """
                 product_id = :product_id
-                OR
-                (
-                    product_id IS NULL
-                    AND category_product_id = :category_product_id
-                )
+                """
             )
-        """
+
+        else:
+            # Есть продукт и категория.
+            #
+            # Получаем:
+            #   1. формулу конкретного продукта
+            #   2. формулу всей категории
+            #
+            # Формула категории может иметь:
+            #   product_id IS NULL
+            #   product_id = 0
+            where_parts.append(
+                """
+                (
+                    product_id = :product_id
+                    OR
+                    (
+                        (product_id IS NULL OR product_id = 0)
+                        AND category_product_id = :category_product_id
+                    )
+                )
+                """
+            )
+
+            params["category_product_id"] = int(category_product_id)
+
         params["product_id"] = int(product_id)
-        params["category_product_id"] = (
-            int(category_product_id)
-            if category_product_id is not None
-            else -1
+
+    # ------------------------------------------------------------------
+    # Выбрана только категория
+    # ------------------------------------------------------------------
+    elif category_product_id is not None:
+
+        where_parts.append(
+            """
+            (product_id IS NULL OR product_id = 0)
+            AND category_product_id = :category_product_id
+            """
         )
 
-
-    elif category_product_id is not None:
-        product_condition = """
-            category_product_id = :category_product_id
-
-        """
         params["category_product_id"] = int(category_product_id)
 
     else:
         return []
-
-    where_parts.append(product_condition)
 
     sql = text(f"""
         SELECT
@@ -380,15 +429,18 @@ def _get_formula_rows(
             {' AND '.join(where_parts)}
         ORDER BY
             CASE
-                WHEN product_id IS NOT NULL AND product_id <> 0 THEN 0
+                WHEN product_id IS NOT NULL
+                     AND product_id <> 0
+                THEN 0
                 ELSE 1
             END,
             id
     """)
 
     return db.execute(sql, params).fetchall()
-
-#============= Получить бюджетные статьи из tab_map_bs_product_d816_4 ============
+#=======================================================================
+# Получить бюджетные статьи из tab_map_bs_product_d816_4
+#=======================================================================
 def _get_mapping_budget_articles(
         factory_id,
         category_product_id=None,
@@ -396,10 +448,9 @@ def _get_mapping_budget_articles(
         ei_id=None
 ):
     """
-    Обязательно:
-        type_raspr = 7
-    При наличии product_id сначала ищем соответствие конкретному продукту.
-    Если продукт не найден — используем соответствие категории.
+    Обязательно: type_raspr = 7
+    Если есть product_id -> ищем соответствие конкретному продукту.
+    Если продукт не найден —> используем соответствие категории.
     """
     db = uf.get_db_connection()
     if not db:
@@ -475,19 +526,18 @@ def _get_formula_for_selection(
         ei_id=None
 ):
     """
-    Выбор формулы согласно правилам.
+    Правила:
+    1. Выбрана только категория:
+       -> формула категории: product_id IS NULL или product_id = 0.
 
-    1. Выбрана категория + product_id отсутствует:
-       -> всегда используется формула категории,
-          где product_id IS NULL или product_id = 0.
+    2. Выбран конкретный продукт:
+       -> если у продукта ровно одна бюджетная статья -> формула продукта;
 
-    2. Выбрана категория + один конкретный продукт:
-       -> если для продукта существует одна бюджетная статья,
-          используется формула продукта;
-       -> если бюджетных статей несколько,
-          используется формула категории.
+       -> если у продукта несколько бюджетных статей -> используется формула всей категории, где product_id IS NULL или product_id = 0.
     """
-
+    # ------------------------------------------------------------------
+    # _get_formula_rows() при product_id возвращает формулу продукта + формулу той же категории с product_id NULL/0.
+    # ------------------------------------------------------------------
     formula_rows = _get_formula_rows(
         factory_id=factory_id,
         category_product_id=category_product_id,
@@ -497,21 +547,9 @@ def _get_formula_for_selection(
 
     if not formula_rows:
         return None
-
-    # ======================================================================
+    # ==================================================================
     # 1. ВЫБРАНА ТОЛЬКО КАТЕГОРИЯ
-    # ======================================================================
-    # product_id = None означает:
-    # "все продукты выбранной категории".
-    #
-    # В этом случае НЕ анализируем формулы конкретных продуктов.
-    # Всегда ищем формулу самой категории:
-    #
-    #     product_id IS NULL
-    #     ИЛИ
-    #     product_id = 0
-    # ======================================================================
-
+    # ==================================================================
     if product_id is None:
 
         if category_product_id is None:
@@ -529,12 +567,6 @@ def _get_formula_for_selection(
             )
         ]
 
-        # Должна быть одна формула категории.
-        if len(category_formula_rows) == 1:
-            return category_formula_rows[0]
-
-        # Если по каким-то причинам найдено несколько,
-        # берем первую по id.
         if category_formula_rows:
             return min(
                 category_formula_rows,
@@ -542,10 +574,9 @@ def _get_formula_for_selection(
             )
 
         return None
-
-    # ======================================================================
+    # ==================================================================
     # 2. ВЫБРАН КОНКРЕТНЫЙ ПРОДУКТ
-    # ======================================================================
+    # ==================================================================
 
     mapping_rows = _get_mapping_budget_articles(
         factory_id=factory_id,
@@ -554,7 +585,7 @@ def _get_formula_for_selection(
         ei_id=ei_id
     )
 
-    # Оставляем только соответствия выбранному продукту.
+    # Только бюджетные статьи  продукта.
     product_mapping_rows = [
         row
         for row in mapping_rows
@@ -563,78 +594,56 @@ def _get_formula_for_selection(
             and int(row.id_product) == int(product_id)
         )
     ]
-
-    # ----------------------------------------------------------------------
-    # Для продукта существует ровно одна бюджетная статья.
-    # Используем формулу конкретного продукта.
-    # ----------------------------------------------------------------------
+    # ==================================================================
+    # 2.1. У продукта ОДНА бюджетная статья
+    # ==================================================================
     if len(product_mapping_rows) == 1:
 
-        for row in formula_rows:
+        product_formula_rows = [
+            row
+            for row in formula_rows
             if (
                 row.product_id is not None
+                and int(row.product_id) != 0
                 and int(row.product_id) == int(product_id)
-            ):
-                return row
+            )
+        ]
 
-    # ----------------------------------------------------------------------
-    # Для продукта несколько бюджетных статей.
-    # Используем формулу категории.
-    # ----------------------------------------------------------------------
-    if category_product_id is not None:
+        if product_formula_rows:
+            return min(
+                product_formula_rows,
+                key=lambda row: int(row.id)
+            )
+    # =================================================================================
+    # 2.2. У продукта НЕСКОЛЬКО бюджетных статей -> Используем формулу всей категории.
+    # =================================================================================
+    if (
+        category_product_id is not None
+        and len(product_mapping_rows) > 1
+    ):
 
         category_id = int(category_product_id)
 
-        for row in formula_rows:
+        category_formula_rows = [
+            row
+            for row in formula_rows
             if (
                 (row.product_id is None or int(row.product_id) == 0)
                 and row.category_product_id is not None
                 and int(row.category_product_id) == category_id
-            ):
-                return row
+            )
+        ]
+
+        if category_formula_rows:
+            return min(
+                category_formula_rows,
+                key=lambda row: int(row.id)
+            )
 
     return None
-
-    # --------------------------------------------------------------------------------
-    # Выбран конкретный продукт -> определить количество бюджетных статей.
-    # --------------------------------------------------------------------------------
-    mapping_rows = _get_mapping_budget_articles(
-        factory_id=factory_id,
-        category_product_id=category_product_id,
-        product_id=product_id,
-        ei_id=ei_id
-    )
-
-    # Оставляем только соответствия выбранному продукту.
-    product_mapping_rows = [
-        row
-        for row in mapping_rows
-        if row.id_product is not None
-        and int(row.id_product) == int(product_id)
-    ]
-
-    # Если для продукта одна статья — формула продукта.
-    if len(product_mapping_rows) == 1:
-        for row in formula_rows:
-            if (
-                row.product_id is not None
-                and int(row.product_id) == int(product_id)
-            ):
-                return row
-
-    # Если статей несколько — формула категории.
-    for row in formula_rows:
-        if (
-            row.product_id is None
-            and category_product_id is not None
-            and row.category_product_id == int(category_product_id)
-        ):
-            return row
-
-    return None
-
+#=========================================================================
 #Получить значение конкретной бюджетной статьи из tab_pererabotka_d816_4
-
+# ========================================================================
 def _get_budget_article_value(
         factory_id,
         budget_article_id,
@@ -678,20 +687,17 @@ def _get_budget_article_value(
         return 0.0
 
     return _safe_float(result.value)
-# ============ Заменить ссылки на бюджетные статьи ============================
+# ============ Заменить ссылки на бюджетные статьи ===========================================
 # Поддерживаются:
 #   {100331992:-1}
 #   {100335432/1000:-1}
 #   {100335432*2:-1}
 #   {100335432/1000+100330002:-1}
-#
 # $100 -> 100
 # $6   -> 6
-#
-# Внутри { ... :-1 } числа длиной 6 и более символов считаются
-# идентификаторами бюджетных статей, а обычные числа, например 1000,
-# остаются обычными числовыми константами.
-
+# Внутри { ... :-1 } числа длиной 6 и более символов считаются идентификаторами бюджетных
+# статей, а обычные числа, остаются обычными числовыми константами.
+#=============================================================================================
 def _replace_formula_budget_references(
         formula,
         factory_id,
@@ -709,26 +715,17 @@ def _replace_formula_budget_references(
         return "0"
 
     formula_text = str(formula).strip()
-
     # -------------------------------------------------------------------------
     # {100335432/1000:-1}
-    #
-    # Сначала обрабатываем содержимое фигурных скобок.
-    # Внутри скобок могут быть арифметические операции.
+    # Сначала обрабатываем содержимое фигурных скобок. Внутри скобок могут быть арифметические операции.
     # -------------------------------------------------------------------------
     def replace_braced(match):
         inner_expression = match.group(1).strip()
 
         # Ищем внутри выражения идентификаторы бюджетных статей.
-        #
         # Например:
-        #   100335432/1000
-        #
-        # превратится в:
-        #   <значение статьи 100335432>/1000
-        #
-        # Числа длиной меньше 6 символов (1000, 2, 10 и т.д.)
-        # считаются обычными константами.
+        #   100335432/1000 превратится в <значение статьи 100335432>/1000
+        # Числа длиной меньше 6 символов (1000, 2, 10 и т.д.) считаются обычными константами.
         def replace_budget_id(id_match):
             budget_article_id = int(id_match.group(0))
 
@@ -757,8 +754,7 @@ def _replace_formula_budget_references(
 
             return str(value)
 
-        # Бюджетные статьи у нас имеют длинные ID.
-        # Поэтому 100335432 заменяем, а 1000 оставляем числом.
+        # Бюджетные статьи имеют длинные id -> 100335432 заменяем, а 1000 оставляем числом.
         inner_expression = re.sub(
             r"\b\d{6,}\b",
             replace_budget_id,
@@ -773,7 +769,6 @@ def _replace_formula_budget_references(
 
     # -------------------------------------------------------------------------
     # Обрабатываем:
-    #
     #   {100331992:-1}
     #   {100335432/1000:-1}
     #   {100335432*2:-1}
@@ -783,7 +778,6 @@ def _replace_formula_budget_references(
         replace_braced,
         formula_text
     )
-
     # -------------------------------------------------------------------------
     # $100 -> 100
     # $6   -> 6
@@ -793,10 +787,10 @@ def _replace_formula_budget_references(
         r"\1",
         formula_text
     )
-
     return formula_text
-
+#=============================================================================================
 # Вычисление арифметического выражения
+#=============================================================================================
 def _safe_eval_arithmetic(expression):
     """
     Поддерживаются:
@@ -869,16 +863,12 @@ def _safe_eval_arithmetic(expression):
         )
 
     return evaluate(tree)
-# ===============Привести формулу из tab_formula_koef_d816_4 к арифметическому виду Python
+#=============================================================================================
+# Привести формулу из tab_formula_koef_d816_4 к арифметическому виду Python
+#=============================================================================================
 def _normalize_formula(formula):
     """
-    Например:
-    ОКРУГЛ(
-        {100331992:-1}/{100335806:-1}*$100;
-        $6
-    )
-    превратить в:
-        round(<expression>, 6)
+    Например: ОКРУГЛ({100331992:-1}/{100335806:-1}*$100;$6) превратить в: round(<expression>, 6)
     """
     formula_text = str(formula).strip()
 
@@ -947,8 +937,9 @@ def _calculate_formula(
         value = round(value, precision)
 
     return value
-
+#=============================================================================================
 # Рассчитать коэффициент выхода бюджетной статьи. Используется для обработки ссылок вида $100
+#=============================================================================================
 def _calculate_budget_article_coefficient(
         budget_article_id,
         factory_id,
@@ -1729,11 +1720,11 @@ def get_exist_factory_collect(factory_id):
     fields_src_list_frame2 = [
         {
             'name': 'cat_product',
-            'default': 9,
+            'default': 2,
         },
         {
             'name': 'product',
-            'default': 7,
+            'default': None,
         },
         {
             'name': 'sobstv',
@@ -1749,7 +1740,7 @@ def get_exist_factory_collect(factory_id):
         },
         {
             'name': 'ei',
-            'default': 1,
+            'default': 2,
         },
     ]
 
@@ -1938,6 +1929,16 @@ def get_calculated_dataset(selected_variant_compare,
                            v_filters_middle_volume_frame2,
                            variant_columns):
     cat_product = get_product_categories()
+    ei_frame2 = 2
+
+    if v_filters_middle_volume_frame2:
+        ei_values = v_filters_middle_volume_frame2.get('ei', [])
+
+        if ei_values:
+            try:
+                ei_frame2 = int(ei_values[0])
+            except (TypeError, ValueError):
+                ei_frame2 = 2
 
     default_category_frame1 = next(
         (
@@ -2004,7 +2005,7 @@ def get_calculated_dataset(selected_variant_compare,
                     selected_variant_compare,
                     selected_factories,
                     variant_columns,
-                    ei=1, ),  # тыс тонн
+                    ei=ei_frame2, ),
                 get_calc_volume(
                     'month',
                     [],
@@ -2013,12 +2014,13 @@ def get_calculated_dataset(selected_variant_compare,
                     selected_variant_compare,
                     selected_factories,
                     variant_columns,
-                    ei=1,  # тыс тонн
+                    ei=ei_frame2,
                 ),
                 filters=v_filters_middle_volume_frame2 or {},
                 selected_factories=selected_factories,
                 variant_columns=variant_columns,
-                ei=1),
+                ei=ei_frame2
+            ),
         }
     else:
         # Извлекаем product из фильтров frame1 для случая без фильтров
@@ -2042,7 +2044,7 @@ def get_calculated_dataset(selected_variant_compare,
                 ei=2, ),  # млн. м3 (Единица измерения)
             'panel_upper_year_volume_frame2': get_calc_volume(
                 'year',
-                [67],  # Нестабильный конденсат
+                [67],
                 [5],  # Переработка
                 {},
                 selected_variant_compare,
@@ -2086,7 +2088,7 @@ def get_calculated_dataset(selected_variant_compare,
                 selected_variant_compare,
                 selected_factories,
                 variant_columns,
-                ei=1, ),  # тыс тонн
+                ei=ei_frame2, ),  # тыс тонн
             # Левая таблица
             'panel_lower_month_volume_tab1': {
                 'ton':

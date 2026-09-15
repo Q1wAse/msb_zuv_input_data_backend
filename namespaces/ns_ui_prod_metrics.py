@@ -162,12 +162,12 @@ flt_container_get_prod_metrics_model = ns_ui_prod_metrics.model('ContainerGetPro
         description='Фильтр для правых графиков',
         required=True,
         example={
-            'product': [7],
-            'sobstv': [1],
-            'mest': [35],
-            'post_zuv': [0],
-            'ei': [1],
-            'cat_product': [9],
+            'product': [],
+            'sobstv': [],
+            'mest': [],
+            'post_zuv': [],
+            'ei': [2],
+            'cat_product': [2],
         }
     ),
     'VariantColumns': fields.List(
@@ -216,12 +216,12 @@ main_container_get_prod_metrics_model = ns_ui_prod_metrics.model('ContainerGetPr
         description='Фильтр для правых графиков',
         required=True,
         example={
-            'product': [7],
-            'sobstv': [1],
-            'mest': [35],
-            'post_zuv': [0],
-            'ei': [1],
-            'cat_product': [9],
+            'product': [],
+            'sobstv': [],
+            'mest': [],
+            'post_zuv': [],
+            'ei': [2],
+            'cat_product': [2],
         }
     ),
     'VariantColumns': fields.List(
