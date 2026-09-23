@@ -114,30 +114,46 @@ def get_tab_name_check(name):
                     return tab_name
     return ''
 #=================== Список категорий продукта ========================================================================================
-def get_product_categories():
+def get_product_categories(factory_id=None):
     db = uf.get_db_connection()
 
-    sql = text("""
-        SELECT
-            category.id,
-            category.name,
-            category.ord,
-            COALESCE(
-                ARRAY_AGG(product.id ORDER BY product.name)
-                    FILTER (WHERE product.id IS NOT NULL),
-                ARRAY[]::INTEGER[]
-            ) AS product
-        FROM tab_category_product_d816_4 AS category
-        LEFT JOIN tab_view_product_d816_4 AS product
-            ON product.group_nom_real = category.id
-        GROUP BY
-            category.id,
-            category.name,
-            category.ord
-        ORDER BY category.ord
-    """)
+    if not db: return []
+    params = {}
 
-    result = db.execute(sql).fetchall()
+    if factory_id is not None:
+        factory_filter = """
+                JOIN tab_pererabotka_d816_4 AS pererab
+                    ON pererab.tab_product_d816_4_ids = product.id
+                    AND pererab.tab_factory_d816_4_ids = :factory_id
+                    AND pererab.tab_type_raspr_d816_4_ids = 7
+            """
+        params["factory_id"] = int(factory_id)
+    else:
+        factory_filter = ""
+
+    sql = text(f"""
+            SELECT
+                category.id,
+                category.name,
+                category.ord,
+                COALESCE(
+                    ARRAY_AGG(DISTINCT product.id ORDER BY product.id)
+                        FILTER (WHERE product.id IS NOT NULL),
+                    ARRAY[]::INTEGER[]
+                ) AS product
+            FROM tab_category_product_d816_4 AS category
+            JOIN tab_view_product_d816_4 AS product
+                ON product.group_nom_real = category.id
+            {factory_filter}
+            GROUP BY
+                category.id,
+                category.name,
+                category.ord
+            ORDER BY
+                category.ord
+        """)
+
+    result = db.execute(sql, params).fetchall()
 
     return [
         {
@@ -170,23 +186,40 @@ def get_product_categories_with_default(default_category_id):
         'value': categories
     }
 #==============Продукты из выбранной категории продукта ================================================================
-def get_products_by_category(category_id):
+def get_products_by_category(category_id, factory_id=None):
     db = uf.get_db_connection()
-    sql = text("""
-        SELECT
-            id,
-            name,
-            group_nom_real
-        FROM tab_view_product_d816_4
-        WHERE group_nom_real = :category_id
-        ORDER BY name
-    """)
-    result = db.execute(
-        sql,
-        {
-            'category_id': int(category_id)
-        }
-    ).fetchall()
+
+    if not db: return []
+
+    params = {
+        'category_id': int(category_id)
+    }
+
+    if factory_id is not None:
+        factory_filter = """
+                AND EXISTS (
+                    SELECT 1
+                    FROM tab_pererabotka_d816_4 AS pererab
+                    WHERE pererab.tab_product_d816_4_ids = product.id
+                      AND pererab.tab_factory_d816_4_ids = :factory_id
+                      AND pererab.tab_type_raspr_d816_4_ids = 7
+                )
+            """
+        params['factory_id'] = int(factory_id)
+    else:
+        factory_filter = ""
+
+    sql = text(f"""
+            SELECT
+                product.id,
+                product.name,
+                product.group_nom_real
+            FROM tab_view_product_d816_4 AS product
+            WHERE product.group_nom_real = :category_id
+            {factory_filter}
+            ORDER BY product.name
+        """)
+    result = db.execute(sql, params).fetchall()
     return [
         {
             'id': row.id,
@@ -1750,7 +1783,7 @@ def get_exist_factory_collect(factory_id):
     fields_src_list_frame2 = [
         {
             'name': 'cat_product',
-            'default': 2,
+            'default': 1,
         },
         {
             'name': 'product',
@@ -1770,7 +1803,7 @@ def get_exist_factory_collect(factory_id):
         },
         {
             'name': 'ei',
-            'default': 2,
+            'default': 1,
         },
     ]
 
@@ -1958,8 +1991,15 @@ def get_calculated_dataset(selected_variant_compare,
                            v_filters_middle_volume_frame1,
                            v_filters_middle_volume_frame2,
                            variant_columns):
-    cat_product = get_product_categories()
-    ei_frame2 = 2
+    # Категории только этого завода.
+    if len(selected_factories) == 1:
+        cat_product = get_product_categories(
+            factory_id=selected_factories[0]
+        )
+    else:
+        cat_product = get_product_categories()
+
+    ei_frame2 = 1
 
     if v_filters_middle_volume_frame2:
         ei_values = v_filters_middle_volume_frame2.get('ei', [])
@@ -1968,35 +2008,7 @@ def get_calculated_dataset(selected_variant_compare,
             try:
                 ei_frame2 = int(ei_values[0])
             except (TypeError, ValueError):
-                ei_frame2 = 2
-
-    default_category_frame1 = next(
-        (
-            item
-            for item in cat_product
-            if item.get('id') == 7
-        ),
-        None
-    )
-
-    default_category_frame2 = next(
-        (
-            item
-            for item in cat_product
-            if item.get('id') == 2
-        ),
-        None
-    )
-
-    cat_product_frame1 = {
-        'default': 7,
-        'value': cat_product
-    }
-
-    cat_product_frame2 = {
-        'default': 2,
-        'value': cat_product
-    }
+                ei_frame2 = 1
 
     # Извлекаем product из фильтров frame1
     products_frame1 = []
@@ -2006,6 +2018,12 @@ def get_calculated_dataset(selected_variant_compare,
     # Если product не передан в фильтрах, используем значение по умолчанию
     if not products_frame1:
         products_frame1 = [67]
+
+    # Категория для расчёта frame2/graph1 только одна
+    frame2_filters = dict(v_filters_middle_volume_frame2 or {})
+    selected_categories = frame2_filters.get('cat_product', [])
+    if selected_categories:
+        frame2_filters['cat_product'] = [selected_categories[0]]
 
     if v_filters_middle_volume_frame1 or v_filters_middle_volume_frame2:
         collection = {
@@ -2021,7 +2039,7 @@ def get_calculated_dataset(selected_variant_compare,
                 'month',
                 [],  # Газ
                 [7],  # Производство
-                v_filters_middle_volume_frame2,
+                frame2_filters,
                 selected_variant_compare,
                 selected_factories,
                 variant_columns),
@@ -2031,7 +2049,7 @@ def get_calculated_dataset(selected_variant_compare,
                     'month',
                     [],  #
                     [7],  # Производство
-                    v_filters_middle_volume_frame2 or {},
+                    frame2_filters,
                     selected_variant_compare,
                     selected_factories,
                     variant_columns,
@@ -2140,7 +2158,7 @@ def get_calculated_dataset(selected_variant_compare,
                         selected_variant_compare,
                         selected_factories,
                         variant_columns,
-                        ei=2, ), 'tab_product_d816_4_ids'),
+                        ei=1, ), 'tab_product_d816_4_ids'),
             },
             # Правая таблица
             'panel_lower_month_volume_tab2': {
@@ -2161,7 +2179,7 @@ def get_calculated_dataset(selected_variant_compare,
                     selected_variant_compare,
                     selected_factories,
                     variant_columns,
-                    ei=2, ), 'tab_product_d816_4_ids'),
+                    ei=1, ), 'tab_product_d816_4_ids'),
             }
         }
         if len(selected_factories) == 1:
@@ -2171,7 +2189,7 @@ def get_calculated_dataset(selected_variant_compare,
 
             # Для frame1 не добавляем cat_product, оставляем только product
             # collection['panel_middle_month_volume_frame1_filter']['cat_product'] = cat_product_frame1
-            collection['panel_middle_month_volume_frame2_filter']['cat_product'] = cat_product_frame2
+            collection['panel_middle_month_volume_frame2_filter']['cat_product'] = cat_product
 
     return collection
 #=======================================================================================================================

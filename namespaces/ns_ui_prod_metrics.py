@@ -21,13 +21,7 @@ import msb_zuv_input_data_backend.functions.utility_functions as uf
 import msb_zuv_input_data_backend.functions.funcs_prod_metrics as funcs_prod_metrics
 
 #==============================================================================================================================
-#==============================================================================================================================
 ns_ui_prod_metrics = Namespace('ns_ui_prod_metrics', description='UI(Statistics) - показатели по переработке сырья и производству товарной продукции')
-#==============================================================================================================================
-#==============================================================================================================================
-# container_prod_metrics = reqparse.RequestParser()
-
-#==============================================================================================================================
 #==============================================================================================================================
 # Получение структуры справчоников и фильтров
 @ns_ui_prod_metrics.route('/get_struct')
@@ -64,13 +58,15 @@ class ClsStructDataProdMetrics(Resource):
                     "utv" : 0
                 })
 
-            cat_product = funcs_prod_metrics.get_product_categories()
+            factory_id = request.args.get('factory_id', type=int)
+            cat_product = funcs_prod_metrics.get_product_categories(factory_id=factory_id)
+
             default_category_frame1 = next(
                 (item for item in cat_product if item.get('id') == 7),
                 None
             )
             default_category_frame2 = next(
-                (item for item in cat_product if item.get('id') == 2),
+                ( item for item in cat_product if item.get('id') == 1),
                 None
             )
 
@@ -113,7 +109,8 @@ class ClsStructDataProdMetrics(Resource):
                     'cat_product': default_category_frame2,
                     'product': (
                         funcs_prod_metrics.get_products_by_category(
-                            default_category_frame2['id']
+                            default_category_frame2['id'],
+                            factory_id=factory_id
                         )
                         if default_category_frame2 else []
                     )
@@ -188,8 +185,8 @@ flt_container_get_prod_metrics_model = ns_ui_prod_metrics.model('ContainerGetPro
             'sobstv': [],
             'mest': [],
             'post_zuv': [],
-            'ei': [2],
-            'cat_product': [2],
+            'ei': [1],
+            'cat_product': [1],
         }
     ),
     'VariantColumns': fields.List(
@@ -242,8 +239,8 @@ main_container_get_prod_metrics_model = ns_ui_prod_metrics.model('ContainerGetPr
             'sobstv': [],
             'mest': [],
             'post_zuv': [],
-            'ei': [2],
-            'cat_product': [2],
+            'ei': [1],
+            'cat_product': [1],
         }
     ),
     'VariantColumns': fields.List(
