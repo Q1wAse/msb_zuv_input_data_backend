@@ -1993,11 +1993,21 @@ def get_calculated_dataset(selected_variant_compare,
                            variant_columns):
     # Категории только этого завода.
     if len(selected_factories) == 1:
-        cat_product = get_product_categories(
+        cat_product_list = get_product_categories(
             factory_id=selected_factories[0]
         )
     else:
-        cat_product = get_product_categories()
+        cat_product_list = get_product_categories()
+
+    # Первый id категории из списка является значением по умолчанию.
+    cat_product = {
+        'default': (
+            cat_product_list[0]['id']
+            if cat_product_list
+            else None
+        ),
+        'value': cat_product_list
+    }
 
     ei_frame2 = 1
 
