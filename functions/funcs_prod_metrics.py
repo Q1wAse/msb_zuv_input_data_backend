@@ -328,8 +328,12 @@ def _get_formula_rows(
             получаем формулу конкретного продукта
             И формулу всей категории.
 
-        - product_id не задан:
-            получаем только формулу всей категории.
+        - product_id не задан, но задана категория:
+            получаем ВСЕ формулы этой категории.
+            Дальше _get_formula_for_selection() определит:
+                * если формула одна -> использовать её независимо
+                  от product_id;
+                * если формул несколько -> использовать формулу категории.
 
     Формула категории:
         product_id IS NULL
@@ -350,9 +354,11 @@ def _get_formula_rows(
         "factory_id": int(factory_id)
     }
 
+    # ------------------------------------------------------------------
     # Единица измерения:
     # сначала точное совпадение ei,
     # также допускается формула с ei IS NULL.
+    # ------------------------------------------------------------------
     if ei_id is not None:
         where_parts.append(
             "(ei = :ei_id OR ei IS NULL)"
@@ -404,10 +410,15 @@ def _get_formula_rows(
     # ------------------------------------------------------------------
     elif category_product_id is not None:
 
+        # ВАЖНО:
+        # Здесь специально НЕ ограничиваем product_id.
+        #
+        # Нам нужны все формулы этой категории, чтобы определить:
+        #   - если формула одна -> использовать её;
+        #   - если формул несколько -> использовать формулу категории.
         where_parts.append(
             """
-            (product_id IS NULL OR product_id = 0)
-            AND category_product_id = :category_product_id
+            category_product_id = :category_product_id
             """
         )
 
@@ -557,13 +568,31 @@ def _get_formula_for_selection(
 
         category_id = int(category_product_id)
 
-        category_formula_rows = [
+        category_rows = [
             row
             for row in formula_rows
             if (
-                (row.product_id is None or int(row.product_id) == 0)
-                and row.category_product_id is not None
-                and int(row.category_product_id) == category_id
+                    row.category_product_id is not None
+                    and int(row.category_product_id) == category_id
+            )
+        ]
+
+        # --------------------------------------------------------------
+        # если для категории существует ровно одна формула, используем её независимо от product_id.
+        # Например: category_product_id = 2  product_id = 67. Это единственная строка -> её и используем.
+        # --------------------------------------------------------------
+        if len(category_rows) == 1:
+            return category_rows[0]
+
+        # --------------------------------------------------------------
+        # Если формул несколько используем формулу всей категории, где product_id IS NULL или product_id = 0.
+        # --------------------------------------------------------------
+        category_formula_rows = [
+            row
+            for row in category_rows
+            if (
+                    row.product_id is None
+                    or int(row.product_id) == 0
             )
         ]
 
@@ -656,7 +685,8 @@ def _get_budget_article_value(
     if not db:
         return 0.0
 
-    sql = text("""
+    sql = text(
+        """
         SELECT
             COALESCE(SUM(main.sum), 0.0) AS value
         FROM tab_fm_zbfm_get_preu_main_msb_zuv AS main
@@ -664,13 +694,13 @@ def _get_budget_article_value(
             ON main.bcbim0002::integer = factory.id_ppasbu::integer
             AND main.pj::integer = factory.bcbem0006::integer
         WHERE
-            factory.id = :factory_id
-            AND main.dbs::integer = 0
-            AND main.bs::integer = :budget_article_id
-            AND main.bcblm0002::integer = :variant_plan
-            AND main.calyear::integer = :year
-            AND main.calmonth::integer = :month
-    """)
+            factory.id = CASE WHEN (:factory_id = 24 OR :factory_id = 25) THEN 2 ELSE :factory_id END
+        AND main.dbs::integer = 0
+        AND main.bs::integer = :budget_article_id
+        AND main.bcblm0002::integer = :variant_plan
+        AND main.calyear::integer = :year
+        AND main.calmonth::integer = :month
+        """)
 
     result = db.execute(
         sql,
