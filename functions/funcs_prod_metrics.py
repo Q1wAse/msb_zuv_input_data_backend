@@ -351,27 +351,30 @@ def _get_formula_rows(
         factory_id,
         category_product_id=None,
         product_id=None,
-        ei_id=None
+        ei_id=None,
+        mest_ids=None
 ):
     """
-    Получить формулы для выбранного завода / категории / продукта.
+    Получить допустимые формулы.
 
-    Правила:
-        - product_id задан:
-            получаем формулу конкретного продукта
-            И формулу всей категории.
+    Структура tab_formula_koef_d816_4:
+        - product_id заполнен всегда;
+        - формула категории:
+              category_product_id = выбранная категория
+              AND mest_id IS NULL/0
+        - формула категории для месторождения:
+              category_product_id = выбранная категория
+              AND mest_id = выбранное месторождение
+        - формула продукта:
+              product_id = выбранный продукт
+              AND mest_id IS NULL/0
+        - формула продукта для месторождения:
+              product_id = выбранный продукт
+              AND mest_id = выбранное месторождение
 
-        - product_id не задан, но задана категория:
-            получаем ВСЕ формулы этой категории.
-            Дальше _get_formula_for_selection() определит:
-                * если формула одна -> использовать её независимо
-                  от product_id;
-                * если формул несколько -> использовать формулу категории.
-
-    Формула категории:
-        product_id IS NULL
-        ИЛИ
-        product_id = 0
+    ВАЖНО:
+        пустой mest_ids означает, что месторождение НЕ выбрано.
+        Это НЕ означает mest_id = 0 на входе.
     """
 
     db = uf.get_db_connection()
@@ -379,93 +382,189 @@ def _get_formula_rows(
     if not db:
         return []
 
-    where_parts = [
-        "factory_id = :factory_id"
+    mest_ids = [
+        int(mest_id)
+        for mest_id in (mest_ids or [])
+        if mest_id is not None
     ]
+    mest_ids = list(dict.fromkeys(mest_ids))
 
     params = {
         "factory_id": int(factory_id)
     }
 
-    # ------------------------------------------------------------------
-    # Единица измерения:
-    # сначала точное совпадение ei,
-    # также допускается формула с ei IS NULL.
-    # ------------------------------------------------------------------
+    where_parts = [
+        "factory_id = :factory_id"
+    ]
+
+    # --------------------------------------------------------------
+    # Единица измерения
+    # --------------------------------------------------------------
     if ei_id is not None:
         where_parts.append(
             "(ei = :ei_id OR ei IS NULL)"
         )
         params["ei_id"] = int(ei_id)
 
-    # ------------------------------------------------------------------
-    # Выбран конкретный продукт
-    # ------------------------------------------------------------------
-    if product_id is not None:
+    # --------------------------------------------------------------
+    # КАТЕГОРИЯ БЕЗ ПРОДУКТА
+    # --------------------------------------------------------------
+    if product_id is None:
 
         if category_product_id is None:
-            # Нет категории -> ищем только формулу продукта
+            return []
+
+        params["category_product_id"] = int(category_product_id)
+
+        # Если mest выбран — разрешаем формулу категории
+        # именно для выбранного mest.
+        if len(mest_ids) == 1:
+
+            params["mest_id"] = mest_ids[0]
+
             where_parts.append(
                 """
-                product_id = :product_id
+                category_product_id = :category_product_id
+                AND (
+                    mest_id = :mest_id
+                    OR mest_id IS NULL
+                    OR mest_id = 0
+                )
                 """
             )
 
+
         else:
-            # Есть продукт и категория.
-            #
-            # Получаем:
-            #   1. формулу конкретного продукта
-            #   2. формулу всей категории
-            #
-            # Формула категории может иметь:
-            #   product_id IS NULL
-            #   product_id = 0
+            # mest не выбран.
+            # Сначала ищем общую формулу категории: category_product_id = выбранная категория и mest_id IS NULL / 0.
+            # Если общей формулы нет, разрешаем взять формулу категории + конкретного продукта.
+            common_where_parts = where_parts + [
+                """
+                category_product_id = :category_product_id
+                AND (mest_id IS NULL OR mest_id = 0)
+                """
+            ]
+            sql_common = text(f"""
+                SELECT
+                    id,
+                    factory_id,
+                    product_id,
+                    category_product_id,
+                    mest_id,
+                    ei,
+                    formula
+                FROM tab_formula_koef_d816_4
+                WHERE
+                    {' AND '.join(common_where_parts)}
+                ORDER BY id
+            """)
+            sql_with_params = sql_common.bindparams(**params)
+            compiled = sql_with_params.compile(dialect=db.bind.dialect,compile_kwargs={"literal_binds": True})
+            print(compiled)
+            common_rows = db.execute(sql_common, params).fetchall()
+            # ----------------------------------------------------------
+            # Если общая формула категории найдена — используем только её.
+            # ----------------------------------------------------------
+            if common_rows:
+                return common_rows
+            # ----------------------------------------------------------
+            # Общей формулы категории нет. Тогда ищем категорию + конкретный продукт.
+            else:
+                # ----------------------------------------------------------
+                product_where_parts = where_parts + [
+                """
+                    category_product_id = :category_product_id
+                    AND product_id > 0
+                """
+                ]
+                sql_product = text(f"""
+                        SELECT
+                        id,
+                        factory_id,
+                        product_id,
+                        category_product_id,
+                        mest_id,
+                        ei,
+                        formula
+                    FROM tab_formula_koef_d816_4
+                    WHERE
+                        {' AND '.join(product_where_parts)}
+                    ORDER BY id
+                """)
+                sql_with_params = sql_product.bindparams(**params)
+                compiled = sql_with_params.compile(dialect=db.bind.dialect,compile_kwargs={"literal_binds": True})
+                print(compiled)
+                return db.execute(sql_product,params).fetchall()
+    # --------------------------------------------------------------
+    # КОНКРЕТНЫЙ ПРОДУКТ
+    # --------------------------------------------------------------
+    else:
+        if category_product_id is None:
+            return []
+
+        params["product_id"] = int(product_id)
+        params["category_product_id"] = int(category_product_id)
+
+        # ----------------------------------------------------------
+        # Одно выбранное месторождение
+        # ----------------------------------------------------------
+        if len(mest_ids) == 1:
+
+            params["mest_id"] = mest_ids[0]
+
             where_parts.append(
                 """
                 (
-                    product_id = :product_id
+                    (
+                        product_id = :product_id
+                        AND (mest_id IS NULL OR mest_id = 0)
+                    )
                     OR
                     (
-                        (product_id IS NULL OR product_id = 0)
-                        AND category_product_id = :category_product_id
+                        category_product_id = :category_product_id
+                        AND (mest_id IS NULL OR mest_id = 0)
                     )
                 )
                 """
             )
 
-            params["category_product_id"] = int(category_product_id)
-
-        params["product_id"] = int(product_id)
-
-    # ------------------------------------------------------------------
-    # Выбрана только категория
-    # ------------------------------------------------------------------
-    elif category_product_id is not None:
-
-        # ВАЖНО:
-        # Здесь специально НЕ ограничиваем product_id.
+        # ----------------------------------------------------------
+        # Месторождение НЕ выбрано
         #
-        # Нам нужны все формулы этой категории, чтобы определить:
-        #   - если формула одна -> использовать её;
-        #   - если формул несколько -> использовать формулу категории.
-        where_parts.append(
-            """
-            category_product_id = :category_product_id
-            """
-        )
+        # Необходимо получить:
+        #   - продукт без mest
+        #   - категорию без mest
+        #
+        # Какую именно формулу использовать — решает
+        # _get_formula_for_selection по количеству статей.
+        # ----------------------------------------------------------
+        else:
 
-        params["category_product_id"] = int(category_product_id)
+            where_parts.append(
+                """
+                (
+                    (
+                        product_id = :product_id
+                    )
+                    OR
+                    (
+                        category_product_id = :category_product_id
+                        AND (mest_id IS NULL OR mest_id = 0)
+                    )
+                )
+                """
+            )
 
-    else:
-        return []
-
+    # --------------------------------------------------------------
+    # SQL
+    # --------------------------------------------------------------
     sql = text(f"""
         SELECT
             id,
             factory_id,
             product_id,
             category_product_id,
+            mest_id,
             ei,
             formula
         FROM tab_formula_koef_d816_4
@@ -473,13 +572,22 @@ def _get_formula_rows(
             {' AND '.join(where_parts)}
         ORDER BY
             CASE
-                WHEN product_id IS NOT NULL
-                     AND product_id <> 0
+                WHEN mest_id IS NOT NULL
+                     AND mest_id <> 0
                 THEN 0
                 ELSE 1
             END,
             id
     """)
+
+    sql_with_params = sql.bindparams(**params)
+
+    compiled = sql_with_params.compile(
+        dialect=db.bind.dialect,
+        compile_kwargs={"literal_binds": True}
+    )
+
+    print(compiled)
 
     return db.execute(sql, params).fetchall()
 #=======================================================================
@@ -489,16 +597,30 @@ def _get_mapping_budget_articles(
         factory_id,
         category_product_id=None,
         product_id=None,
-        ei_id=None
+        ei_id=None,
+        mest_ids=None
 ):
     """
-    Обязательно: type_raspr = 7
-    Если есть product_id -> ищем соответствие конкретному продукту.
-    Если продукт не найден —> используем соответствие категории.
+    Получить соответствия продукта/категории с бюджетными статьями.
+    Всегда используется type_raspr = 7.
+    Для выбранного продукта:
+        - ищем соответствия конкретного продукта;
+        - если конкретного продукта нет, используется соответствие категории.
+    mest_ids:
+        - если передан список месторождений, берём только эти месторождения;
+        - если список пустой, фильтр по месторождению не применяется.
+    В результате одна и та же бюджетная статья может встречаться
+    несколько раз для разных месторождений, поэтому количество
+    бюджетных статей далее должно определяться по уникальному id.
     """
     db = uf.get_db_connection()
     if not db:
         return []
+    # --------------------------------------------------------------
+    # Нормализуем месторождения
+    # --------------------------------------------------------------
+    mest_ids = [int(mest_id) for mest_id in (mest_ids or []) if mest_id is not None]
+    mest_ids = list(dict.fromkeys(mest_ids))
 
     params = {
         "factory_id": int(factory_id),
@@ -510,198 +632,442 @@ def _get_mapping_budget_articles(
         "type_raspr = :type_raspr"
     ]
 
+    # --------------------------------------------------------------
+    # Единица измерения
+    # --------------------------------------------------------------
     if ei_id is not None:
-        where_parts.append("ei_id = :ei_id")
+        where_parts.append(
+            "ei_id = :ei_id"
+        )
         params["ei_id"] = int(ei_id)
 
+    # --------------------------------------------------------------
+    # Месторождения
+    # --------------------------------------------------------------
+    if mest_ids:
+        where_parts.append(
+            "mest = ANY(:mest_ids)"
+        )
+        params["mest_ids"] = mest_ids
+    # --------------------------------------------------------------
+    # Продукт
+    # --------------------------------------------------------------
     if product_id is not None:
-        product_condition = "id_product = :product_id"
+        where_parts.append(
+            "id_product = :product_id"
+        )
         params["product_id"] = int(product_id)
 
-        if category_product_id is not None:
-            product_condition = """
-                (
-                    id_product = :product_id
-                    OR
-                    (
-                        id_product IS NULL
-                        AND category_product_id = :category_product_id
-                    )
-                )
-            """
-            params["category_product_id"] = int(category_product_id)
-
-        where_parts.append(product_condition)
-
-    elif category_product_id is not None:
-        where_parts.append(
-            """
-            (
-                id_product IS NULL
-                AND category_product_id = :category_product_id
-            )
-            """
-        )
-        params["category_product_id"] = int(category_product_id)
-
+        sql = text(f"""
+                            SELECT DISTINCT
+                                id,
+                                id_product,
+                                category_product_id,
+                                factory,
+                                ei_id,
+                                mest,
+                                type_raspr
+                            FROM tab_map_bs_product_d816_4
+                            WHERE
+                                {' AND '.join(where_parts)}
+                            ORDER BY
+                                id,
+                                mest
+                        """)
+        sql_with_params = sql.bindparams(**params)
+        compiled = sql_with_params.compile(dialect=db.bind.dialect, compile_kwargs={"literal_binds": True})
+        print(compiled)
+        return db.execute(sql, params).fetchall()
     else:
-        return []
-
-    sql = text(f"""
-        SELECT DISTINCT
-            id,
-            id_product,
-            category_product_id,
-            factory,
-            ei_id,
-            type_raspr
-        FROM tab_map_bs_product_d816_4
-        WHERE
-            {' AND '.join(where_parts)}
-        ORDER BY id
-    """)
-
-    return db.execute(sql, params).fetchall()
+        if category_product_id is None:
+            return []
+        params["category_product_id"] = int(category_product_id)
+        # Для категории без продукта - берем общую строку.
+        if category_product_id is not None:
+            common_where_parts = where_parts + [
+                """
+                (
+                    group_stat = 1
+                    AND category_product_id = :category_product_id
+                )
+                """
+            ]
+            sql_common = text(f"""
+                   SELECT DISTINCT
+                       id,
+                       id_product,
+                       category_product_id,
+                       factory,
+                       ei_id,
+                       mest,
+                       type_raspr
+                   FROM tab_map_bs_product_d816_4
+                   WHERE
+                       {' AND '.join(common_where_parts)}
+                   ORDER BY
+                       id,
+                       mest
+               """)
+            sql_with_params = sql_common.bindparams(**params)
+            compiled = sql_with_params.compile(dialect=db.bind.dialect,compile_kwargs={"literal_binds": True})
+            print(compiled)
+            common_rows = db.execute(sql_common,params).fetchall()
+            # --------------------------------------------------------------
+            # Если общие строки найдены — используем ТОЛЬКО их.Второй вариант больше не проверяем.
+            # --------------------------------------------------------------
+            if common_rows:
+                return common_rows
+            # -------------------------------------------------------------
+            # Общих строк нет. Тогда ищем категорию + конкретный продукт.
+            # --------------------------------------------------------------
+            product_where_parts = where_parts + [
+                """
+                (
+                    category_product_id = :category_product_id
+                    AND id_product > 0
+                )
+                """
+            ]
+            sql_product = text(f"""
+                    SELECT DISTINCT
+                        id,
+                        id_product,
+                        category_product_id,
+                        factory,
+                        ei_id,
+                        mest,
+                        type_raspr
+                    FROM tab_map_bs_product_d816_4
+                    WHERE
+                        {' AND '.join(product_where_parts)}
+                    ORDER BY
+                        id,
+                        mest
+                """)
+            sql_with_params = sql_product.bindparams(**params)
+            compiled = sql_with_params.compile(dialect=db.bind.dialect,compile_kwargs={"literal_binds": True})
+            print(compiled)
+            return db.execute(sql_product,params).fetchall()
+        else:
+            return None
 # ===================== Выбрать формулу согласно правилам: ====================
 def _get_formula_for_selection(
         factory_id,
         category_product_id=None,
         product_id=None,
-        ei_id=None
+        ei_id=None,
+        mest_ids=None
 ):
     """
-    Правила:
-    1. Выбрана только категория:
-       -> формула категории: product_id IS NULL или product_id = 0.
-
-    2. Выбран конкретный продукт:
-       -> если у продукта ровно одна бюджетная статья -> формула продукта;
-
-       -> если у продукта несколько бюджетных статей -> используется формула всей категории, где product_id IS NULL или product_id = 0.
+    1. category, без product и mest: если 1 бюджетная статья -> формула категории, mest_id = 0
+    2. category + mest, без product: если 1 бюджетная статья -> формула категории + выбранный mest
+    3. category + mest, без product: если > 1 бюджетной статьи -> формула категории, mest_id = 0
+    4. category + product, без mest: если 1 бюджетная статья -> формула продукта, mest_id = 0
+    5. category + product, без mest: если > 1 бюджетной статьи -> формула категории, mest_id = 0
+    6. category + product + mest: если 1 бюджетная статья -> формула продукта + выбранный mest
     """
-    # ------------------------------------------------------------------
-    # _get_formula_rows() при product_id возвращает формулу продукта + формулу той же категории с product_id NULL/0.
-    # ------------------------------------------------------------------
-    formula_rows = _get_formula_rows(
-        factory_id=factory_id,
-        category_product_id=category_product_id,
-        product_id=product_id,
-        ei_id=ei_id
-    )
+    # --------------------------------------------------------------
+    # Нормализация mest
+    # --------------------------------------------------------------
+    mest_ids = [
+        int(mest_id)
+        for mest_id in (mest_ids or [])
+        if mest_id is not None
+    ]
+    mest_ids = list(dict.fromkeys(mest_ids))
 
-    if not formula_rows:
+    # ==============================================================
+    # Нет категории - этого быть не может, но мало ли
+    # ==============================================================
+    if category_product_id is None:
         return None
-    # ==================================================================
-    # 1. ВЫБРАНА ТОЛЬКО КАТЕГОРИЯ
-    # ==================================================================
+    category_product_id = int(category_product_id)
+    # ==============================================================
+    # Правила 1-3 только категория без продукта
+    # ==============================================================
     if product_id is None:
+        # ----------------------------------------------------------
+        # 1. category + mest не выбран
+        # ----------------------------------------------------------
+        if len(mest_ids) == 0:
+            mapping_rows = _get_mapping_budget_articles(
+                factory_id=factory_id,
+                category_product_id=category_product_id,
+                product_id=None,
+                ei_id=ei_id,
+                mest_ids=[]
+            )
+            budget_article_ids = {
+                int(row.id)
+                for row in mapping_rows
+                if row.id is not None
+            }
 
-        if category_product_id is None:
+            budget_articles_count = len(budget_article_ids)
+            # По правилу №1 формула категории с mest = 0 используется только при одной статье.
+            if budget_articles_count != 1:
+                return None
+
+            formula_rows = _get_formula_rows(
+                factory_id=factory_id,
+                category_product_id=category_product_id,
+                product_id=None,
+                ei_id=ei_id,
+                mest_ids=[]
+            )
+
+            category_formula_rows = [
+                row
+                for row in formula_rows
+                if (
+                        row.category_product_id is not None
+                        and int(row.category_product_id) == category_product_id
+                        and (
+                                row.mest_id is None
+                                or int(row.mest_id) == 0
+                        )
+                )
+            ]
+
+            if category_formula_rows:
+                return min(
+                    category_formula_rows,
+                    key=lambda row: int(row.id)
+                )
+            else:
+                category_formula_rows = [
+                    row
+                    for row in formula_rows
+                    if (
+                            row.category_product_id is not None
+                            and int(row.category_product_id) == category_product_id
+                            and row.product_id > 0
+                    )
+                ]
+
+            if category_formula_rows:
+                return min(
+                    category_formula_rows,
+                    key=lambda row: int(row.id)
+                )
+            else:
+                return None
+
+        # ----------------------------------------------------------
+        # Правила 2–3. category + mest
+        # ----------------------------------------------------------
+        if len(mest_ids) == 1:
+            selected_mest_id = mest_ids[0]
+            mapping_rows = _get_mapping_budget_articles(
+                factory_id=factory_id,
+                category_product_id=category_product_id,
+                product_id=None,
+                ei_id=ei_id,
+                mest_ids=mest_ids
+            )
+            budget_article_ids = {
+                int(row.id)
+                for row in mapping_rows
+                if row.id is not None
+            }
+            budget_articles_count = len(budget_article_ids)
+            # ------------------------------------------------------
+            # Правило №2: 1 статья -> category + выбранное mest
+            # ------------------------------------------------------
+            if budget_articles_count == 1:
+                formula_rows = _get_formula_rows(
+                    factory_id=factory_id,
+                    category_product_id=category_product_id,
+                    product_id=None,
+                    ei_id=ei_id,
+                    mest_ids=mest_ids
+                )
+                category_mest_formula_rows = [
+                    row
+                    for row in formula_rows
+                    if (
+                        row.category_product_id is not None
+                        and int(row.category_product_id)
+                        == category_product_id
+                        and row.mest_id is not None
+                        and int(row.mest_id) == selected_mest_id
+                    )
+                ]
+                if category_mest_formula_rows:
+                    return min(
+                        category_mest_formula_rows,
+                        key=lambda row: int(row.id)
+                    )
+
+                return None
+            # ------------------------------------------------------
+            # Правило №3: >1 статья -> category + mest = 0
+            # ------------------------------------------------------
+            if budget_articles_count > 1:
+                formula_rows = _get_formula_rows(
+                    factory_id=factory_id,
+                    category_product_id=category_product_id,
+                    product_id=None,
+                    ei_id=ei_id,
+                    mest_ids=[]
+                )
+                category_formula_rows = [
+                    row
+                    for row in formula_rows
+                    if (
+                        row.category_product_id is not None
+                        and int(row.category_product_id)
+                        == category_product_id
+                        and (
+                            row.mest_id is None
+                            or int(row.mest_id) == 0
+                        )
+                    )
+                ]
+                if category_formula_rows:
+                    return min(
+                        category_formula_rows,
+                        key=lambda row: int(row.id)
+                    )
             return None
-
-        category_id = int(category_product_id)
-
-        category_rows = [
-            row
-            for row in formula_rows
-            if (
-                    row.category_product_id is not None
-                    and int(row.category_product_id) == category_id
-            )
-        ]
-
-        # --------------------------------------------------------------
-        # если для категории существует ровно одна формула, используем её независимо от product_id.
-        # Например: category_product_id = 2  product_id = 67. Это единственная строка -> её и используем.
-        # --------------------------------------------------------------
-        if len(category_rows) == 1:
-            return category_rows[0]
-
-        # --------------------------------------------------------------
-        # Если формул несколько используем формулу всей категории, где product_id IS NULL или product_id = 0.
-        # --------------------------------------------------------------
-        category_formula_rows = [
-            row
-            for row in category_rows
-            if (
-                    row.product_id is None
-                    or int(row.product_id) == 0
-            )
-        ]
-
-        if category_formula_rows:
-            return min(
-                category_formula_rows,
-                key=lambda row: int(row.id)
-            )
-
+        # Если фронт передал несколько mest одновременно, отдельного правила в заданных 6 условиях нет.
         return None
-    # ==================================================================
-    # 2. ВЫБРАН КОНКРЕТНЫЙ ПРОДУКТ
-    # ==================================================================
-
+    # ==============================================================
+    # Правила 4–6: есть продукт
+    # ==============================================================
+    product_id = int(product_id)
+    # --------------------------------------------------------------
+    # Получаем бюджетные статьи для этого продукта
+    # --------------------------------------------------------------
     mapping_rows = _get_mapping_budget_articles(
         factory_id=factory_id,
         category_product_id=category_product_id,
         product_id=product_id,
-        ei_id=ei_id
+        ei_id=ei_id,
+        mest_ids=mest_ids
     )
-
-    # Только бюджетные статьи  продукта.
     product_mapping_rows = [
         row
         for row in mapping_rows
         if (
             row.id_product is not None
-            and int(row.id_product) == int(product_id)
+            and int(row.id_product) == product_id
         )
     ]
-    # ==================================================================
-    # 2.1. У продукта ОДНА бюджетная статья
-    # ==================================================================
-    if len(product_mapping_rows) == 1:
+    budget_article_ids = {
+        int(row.id)
+        for row in product_mapping_rows
+        if row.id is not None
+    }
+    budget_articles_count = len(budget_article_ids)
+    # ==============================================================
+    # Правила 4–5: category + product, mest не выбрано
+    # ==============================================================
+    if len(mest_ids) == 0:
+        formula_rows = _get_formula_rows(
+            factory_id=factory_id,
+            category_product_id=category_product_id,
+            product_id=product_id,
+            ei_id=ei_id,
+            mest_ids=[]
+        )
+        # ----------------------------------------------------------
+        # Правило №4: 1 бюджетная статья -> формула продукта
+        # ----------------------------------------------------------
+        if budget_articles_count == 1:
+            product_formula_rows = [
+                row
+                for row in formula_rows
+                if (
+                    row.product_id is not None
+                    and int(row.product_id) == product_id
+                )
+            ]
+            if product_formula_rows:
+                return min(
+                    product_formula_rows,
+                    key=lambda row: int(row.id)
+                )
+            return None
+        # ----------------------------------------------------------
+        # Правило №5: >1 бюджетной статьи -> сначала ищем формулу продукта + mest = 0, если такой нет -> формулу категории + mest = 0
+        # ----------------------------------------------------------
+        if budget_articles_count > 1:
+            # ------------------------------------------------------
+            # 5.1. Сначала формула конкретного продукта без mest
+            # ------------------------------------------------------
+            product_formula_rows = [
+                row
+                for row in formula_rows
+                if (
+                        row.product_id is not None
+                        and int(row.product_id) == product_id
+                        and (
+                                row.mest_id is None
+                                or int(row.mest_id) == 0
+                        )
+                )
+            ]
 
-        product_formula_rows = [
-            row
-            for row in formula_rows
-            if (
-                row.product_id is not None
-                and int(row.product_id) != 0
-                and int(row.product_id) == int(product_id)
+            if product_formula_rows:
+                return min(
+                    product_formula_rows,
+                    key=lambda row: int(row.id)
+                )
+            # ------------------------------------------------------
+            # 5.2. Если формулы продукта без mest нет, используем формулу категории без mest
+            # ------------------------------------------------------
+            category_formula_rows = [
+                row
+                for row in formula_rows
+                if (
+                        row.category_product_id is not None
+                        and int(row.category_product_id) == category_product_id
+                        and (
+                                row.mest_id is None
+                                or int(row.mest_id) == 0
+                        )
+                )
+            ]
+            if category_formula_rows:
+                return min(
+                    category_formula_rows,
+                    key=lambda row: int(row.id)
+                )
+    # ==============================================================
+    # Правило 6: category + product + mest
+    # ==============================================================
+    if len(mest_ids) == 1:
+        selected_mest_id = mest_ids[0]
+        # ----------------------------------------------------------
+        # Только при одной бюджетной статье
+        # ----------------------------------------------------------
+        if budget_articles_count == 1:
+            formula_rows = _get_formula_rows(
+                factory_id=factory_id,
+                category_product_id=category_product_id,
+                product_id=product_id,
+                ei_id=ei_id,
+                mest_ids=mest_ids
             )
-        ]
-
-        if product_formula_rows:
-            return min(
-                product_formula_rows,
-                key=lambda row: int(row.id)
-            )
-    # =================================================================================
-    # 2.2. У продукта НЕСКОЛЬКО бюджетных статей -> Используем формулу всей категории.
-    # =================================================================================
-    if (
-        category_product_id is not None
-        and len(product_mapping_rows) > 1
-    ):
-
-        category_id = int(category_product_id)
-
-        category_formula_rows = [
-            row
-            for row in formula_rows
-            if (
-                (row.product_id is None or int(row.product_id) == 0)
-                and row.category_product_id is not None
-                and int(row.category_product_id) == category_id
-            )
-        ]
-
-        if category_formula_rows:
-            return min(
-                category_formula_rows,
-                key=lambda row: int(row.id)
-            )
-
+            product_mest_formula_rows = [
+                row
+                for row in formula_rows
+                if (
+                    row.product_id is not None
+                    and int(row.product_id) == product_id
+                    and row.mest_id is not None
+                    and int(row.mest_id) == selected_mest_id
+                )
+            ]
+            if product_mest_formula_rows:
+                return min(
+                    product_mest_formula_rows,
+                    key=lambda row: int(row.id)
+                )
+        return None
+    # Несколько выбранных mest одновременно не описаны
+    # шестью заданными правилами.
     return None
 #=========================================================================
 #Получить значение конкретной бюджетной статьи из tab_pererabotka_d816_4
@@ -1135,20 +1501,27 @@ def _get_percent_output_by_formula(
         ei_id,
         variant_plan,
         year,
-        month
+        month,
+        mest_ids=None
 ):
     """
-    Правила выбора формулы:
-        - все продукты категории -> формула категории;
-        - один продукт + одна бюджетная статья -> формула продукта;
-        - один продукт + несколько бюджетных статей -> формула категории.
+    Рассчитать процент выхода.
+
+    Выбор формулы выполняется строго по правилам:
+        1. category + без product/mest + 1 статья -> category, mest=0
+        2. category + mest + 1 статья -> category + выбранный mest
+        3. category + mest + >1 статьи -> category, mest=0
+        4. category + product + без mest + 1 статья -> product
+        5. category + product + без mest + > 1 статьи -> product + mest = 0, если такого нет, то category + mest = 0
+        6. category + product + mest + 1 статья -> product + выбранный mest
     """
 
     formula_row = _get_formula_for_selection(
         factory_id=factory_id,
         category_product_id=category_product_id,
         product_id=product_id,
-        ei_id=ei_id
+        ei_id=ei_id,
+        mest_ids=mest_ids
     )
 
     if not formula_row:
@@ -1230,6 +1603,11 @@ def get_list_percent_from_lists(
         if product_id is not None
     ]
 
+    mest_list = [
+        int(mest_id)
+        for mest_id in filters.get("mest", [])
+        if mest_id is not None
+    ]
     # --------------------------------------------------------------------------------
     # Если выбрана категория, но продукты не выбраны,
     # это означает "все продукты категории".
@@ -1376,7 +1754,8 @@ def get_list_percent_from_lists(
                         "variantPlaning"
                     ],
                     year=variant1_formula_data["year"],
-                    month=month_int
+                    month=month_int,
+                    mest_ids=mest_list
                 )
 
                 if percent_formula_v1 is not None:
@@ -1400,7 +1779,8 @@ def get_list_percent_from_lists(
                         "variantPlaning"
                     ],
                     year=variant2_formula_data["year"],
-                    month=month_int
+                    month=month_int,
+                    mest_ids=mest_list
                 )
 
                 if percent_formula_v2 is not None:
@@ -1580,13 +1960,40 @@ def get_calc_volume(
 
     product_list = [int(item) for item in product]
 
+    from sqlalchemy import text, bindparam, Integer
+    from sqlalchemy.dialects.postgresql import ARRAY
+
+    params = {
+        "cat_product": category_list
+    }
+
     if category_list:
+        from sqlalchemy import text, bindparam, Integer
+        from sqlalchemy.dialects.postgresql import ARRAY
+
+        params = {
+            "cat_product": category_list
+        }
+
         sql_products = text("""
-                SELECT id
-                FROM tab_view_product_d816_4
-                WHERE group_nom_real = ANY(:cat_product)
-                ORDER BY name
-            """)
+            SELECT id
+            FROM tab_view_product_d816_4
+            WHERE group_nom_real = ANY(:cat_product)
+            ORDER BY name
+        """).bindparams(
+            bindparam(
+                "cat_product",
+                value=category_list,
+                type_=ARRAY(Integer)
+            )
+        )
+
+        compiled = sql_products.compile(
+            dialect=db.bind.dialect,
+            compile_kwargs={"literal_binds": True}
+        )
+
+        print(compiled)
 
         result_products = db.execute(
             sql_products,
